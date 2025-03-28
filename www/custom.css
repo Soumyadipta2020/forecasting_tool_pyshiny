@@ -1,0 +1,148 @@
+/* ===== Custom styling for AI Forecasting App ===== */
+
+/* ----- Global styling ----- */
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+/* ----- Header styling ----- */
+.navbar {
+  background-color: #0076d7 !important;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.navbar-brand {
+  color: white !important;
+  font-weight: bold;
+  font-size: 1.2rem;
+}
+
+.navbar .navbar-nav .nav-link {
+  color: white !important;
+}
+
+/* Dark mode toggle styling */
+.dark-mode-toggle {
+  padding: 0.5rem;
+}
+
+.dark-mode-toggle .form-check {
+  margin-bottom: 0;
+}
+
+.dark-mode-toggle .form-check-input:checked {
+  background-color: #fff;
+  border-color: #fff;
+}
+
+.dark-mode-toggle label {
+  color: white;
+}
+
+.dark-mode-toggle i {
+  font-size: 1.2rem;
+  color: white;
+}
+
+/* ----- Sidebar styling ----- */
+.nav-pills {
+  background-color: #2c3e50;
+}
+
+.nav-pills .nav-link {
+  color: white !important;
+  border-radius: 0;
+  border-left: 3px solid transparent;
+  padding: 15px 20px;
+  transition: all 0.3s;
+}
+
+.nav-pills .nav-link.active {
+  background-color: #3498db !important;
+  border-left: 3px solid white;
+}
+
+.nav-pills .nav-link:hover:not(.active) {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  border-left: 3px solid #3498db;
+}
+
+/* ----- Icon styling ----- */
+.nav-pills .nav-link i {
+  margin-right: 10px;
+}
+
+/* ----- Card/Panel styling ----- */
+.card {
+  border-radius: 3px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  border: none;
+  margin-bottom: 20px;
+}
+
+.card-header {
+  background-color: #f8f9fa;
+  border-bottom: 1px solid #e9ecef;
+  font-weight: 600;
+}
+
+/* ----- Button styling ----- */
+.btn {
+  border-radius: 10px;
+  padding: 0.5rem 1rem;
+  transition: all 0.2s ease;
+}
+
+.btn-primary {
+  background-color: #0076d7;
+  border-color: #0076d7;
+}
+
+.btn-primary:hover {
+  background-color: #0062b1;
+  border-color: #0062b1;
+}
+
+.btn-info {
+  border-radius: 10px;
+  background-color: #17a2b8;
+  border-color: #17a2b8;
+}
+
+.btn-info:hover {
+  background-color: #138496;
+  border-color: #138496;
+}
+
+/* ----- Tab styling ----- */
+.nav-tabs {
+  border-bottom: 1px solid #dee2e6;
+}
+
+.nav-tabs .nav-link {
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #495057;
+}
+
+.nav-tabs .nav-link.active {
+  border: none;
+  border-bottom: 2px solid #0076d7;
+  color: #0076d7;
+  background-color: transparent;
+}
+
+/* ----- Form controls ----- */
+.form-control, .form-select, .custom-file-label {
+  border-radius: 10px;
+  border: 1px solid #ced4da;
+}
+
+/* ----- Footer styling ----- */
+.footer {
+  border-top: 1px solid #e9ecef;
+  padding: 10px 15px;
+  font-size: 0.85rem;
+  color: #6c757d;
+  background-color: #f8f9fa;
+} 

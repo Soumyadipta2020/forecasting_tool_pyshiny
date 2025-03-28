@@ -7,13 +7,14 @@ data processing, and forecasting models.
 """
 
 # ===== IMPORTS =====
-from shiny import reactive, render
+from shiny import reactive, render, ui
 import pandas as pd
 import matplotlib.pyplot as plt
 from prophet import Prophet
 from statsmodels.tsa.arima.model import ARIMA
 import numpy as np
 from global_helpers import calculate_metrics
+import seaborn as sns
 
 # ===== MAIN SERVER FUNCTION =====
 def server_function(input, output, session):
@@ -69,6 +70,99 @@ def server_function(input, output, session):
             return data.get()
         return pd.DataFrame()
     
+    # ----- Data Visualization -----
+    @output
+    @render.plot
+    def data_viz():
+        """Render a visualization of the uploaded data."""
+        if data.get() is None:
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.text(
+                0.5, 0.5,
+                "Upload data to see visualization",
+                ha='center', va='center',
+                transform=ax.transAxes
+            )
+            return fig
+            
+        df = data.get()
+        # Use the first numeric column for visualization
+        numeric_cols = df.select_dtypes(include=['number']).columns
+        
+        if len(numeric_cols) > 0:
+            target_col = numeric_cols[0]
+            fig, ax = plt.subplots(figsize=(10, 6))
+            
+            # If we have a datetime column, use it for x-axis
+            date_cols = [col for col in df.columns if 'date' in col.lower() or 'time' in col.lower()]
+            if date_cols:
+                date_col = date_cols[0]
+                # Convert to datetime if not already
+                if not pd.api.types.is_datetime64_any_dtype(df[date_col]):
+                    df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+                
+                ax.plot(df[date_col], df[target_col], marker='o', linestyle='-', alpha=0.7)
+                ax.set_xlabel(date_col)
+            else:
+                # Otherwise use index
+                ax.plot(df.index, df[target_col], marker='o', linestyle='-', alpha=0.7)
+                ax.set_xlabel('Index')
+                
+            ax.set_ylabel(target_col)
+            ax.set_title(f'Time Series Plot of {target_col}')
+            ax.grid(True, alpha=0.3)
+            
+            # Add a trend line
+            try:
+                z = np.polyfit(range(len(df)), df[target_col], 1)
+                p = np.poly1d(z)
+                ax.plot(range(len(df)), p(range(len(df))), "r--", alpha=0.7, label='Trend')
+                ax.legend()
+            except:
+                pass
+                
+            plt.tight_layout()
+            return fig
+        else:
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.text(
+                0.5, 0.5,
+                "No numeric columns found for visualization",
+                ha='center', va='center',
+                transform=ax.transAxes
+            )
+            return fig
+    
+    # ----- Summary Statistics -----
+    @output
+    @render.table
+    def summary_stats():
+        """Display summary statistics for the data."""
+        if data.get() is None:
+            return pd.DataFrame({'Note': ['Upload data to see summary statistics']})
+            
+        df = data.get()
+        # Calculate summary statistics for numeric columns
+        numeric_df = df.select_dtypes(include=['number'])
+        
+        if numeric_df.empty:
+            return pd.DataFrame({'Note': ['No numeric columns found in the data']})
+            
+        # Calculate basic statistics
+        stats = numeric_df.describe().T
+        
+        # Add additional statistics
+        stats['skew'] = numeric_df.skew()
+        stats['kurtosis'] = numeric_df.kurtosis()
+        
+        # Round to 2 decimal places
+        stats = stats.round(2)
+        
+        # Reset index to make column names a column
+        stats = stats.reset_index().rename(columns={'index': 'variable'})
+        
+        return stats
+    
     # ----- Forecast Runner -----
     @reactive.effect
     def _():
@@ -83,8 +177,13 @@ def server_function(input, output, session):
             return
         
         df = data.get()
-        time_var = input.time_variable()
-        target_var = input.target_variable()
+        # Get time and target columns
+        date_cols = [col for col in df.columns if 'date' in col.lower() or 'time' in col.lower()]
+        numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+        
+        time_var = date_cols[0] if date_cols else df.columns[0]
+        target_var = numeric_cols[0] if numeric_cols else df.columns[1]
+        
         horizon = input.forecast_horizon()
         model_type = input.forecast_model()
         
@@ -124,6 +223,20 @@ def server_function(input, output, session):
             'Metric': ['Note'],
             'Value': ["Run a forecast to see metrics"]
         })
+    
+    # ----- Template Download Handler -----
+    @output
+    @render.download(filename="sample_data.csv")
+    def download_template():
+        """Handle template file download."""
+        if not input.download_template:
+            return None
+            
+        def generate_content():
+            with open("www/timeseries_demo.csv", "r") as file:
+                return file.read()
+                
+        return generate_content
 
 # ===== FORECASTING MODELS =====
 def run_prophet_forecast(ts_data, time_var, target_var, horizon, output):
@@ -169,11 +282,15 @@ def run_prophet_forecast(ts_data, time_var, target_var, horizon, output):
         """Render the Prophet forecast plot."""
         fig, ax = plt.subplots(figsize=(10, 6))
         
+        # Set a more modern style
+        plt.style.use('seaborn-v0_8-whitegrid')
+        
         # Plot actual values
-        ax.plot(prophet_df['ds'], prophet_df['y'], 'b-', label='Actual')
+        ax.plot(prophet_df['ds'], prophet_df['y'], 'b-', linewidth=2, alpha=0.8, label='Actual')
         
         # Plot forecast
-        ax.plot(forecast['ds'].tail(horizon), forecast['yhat'].tail(horizon), 'r-', label='Forecast')
+        ax.plot(forecast['ds'].tail(horizon), forecast['yhat'].tail(horizon), 
+                'r-', linewidth=2, alpha=0.8, label='Forecast')
         
         # Plot prediction intervals
         ax.fill_between(
@@ -183,11 +300,15 @@ def run_prophet_forecast(ts_data, time_var, target_var, horizon, output):
             color='red', alpha=0.2, label='95% Confidence Interval'
         )
         
-        ax.set_title(f'Forecast for {target_var} (Next {horizon} periods)')
-        ax.set_xlabel('Time')
-        ax.set_ylabel(target_var)
-        ax.legend()
+        ax.set_title(f'Prophet Forecast for {target_var} (Next {horizon} periods)', fontsize=14)
+        ax.set_xlabel('Time', fontsize=12)
+        ax.set_ylabel(target_var, fontsize=12)
+        ax.legend(fontsize=10)
         
+        # Add grid for readability
+        ax.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
         return fig
     
     # ----- Metrics Calculation -----
@@ -236,22 +357,39 @@ def run_arima_forecast(ts_data, time_var, target_var, horizon, output):
         """Render the ARIMA forecast plot."""
         fig, ax = plt.subplots(figsize=(10, 6))
         
-        # Plot actual values
-        ax.plot(range(len(ts_values)), ts_values, 'b-', label='Actual')
+        # Set a more modern style
+        plt.style.use('seaborn-v0_8-whitegrid')
         
-        # Plot forecast
-        ax.plot(
-            range(len(ts_values), len(ts_values) + horizon),
-            forecast_values,
-            'r-',
-            label='Forecast'
-        )
+        # Get date values if available
+        if pd.api.types.is_datetime64_any_dtype(ts_data[time_var]):
+            x_actual = ts_data[time_var]
+            # Generate future dates
+            last_date = x_actual.iloc[-1]
+            date_range = pd.date_range(start=last_date, periods=horizon+1)[1:]
+            x_forecast = date_range
+            
+            # Plot with dates
+            ax.plot(x_actual, ts_values, 'b-', linewidth=2, alpha=0.8, label='Actual')
+            ax.plot(x_forecast, forecast_values, 'r-', linewidth=2, alpha=0.8, label='Forecast')
+        else:
+            # Plot with indices
+            ax.plot(range(len(ts_values)), ts_values, 'b-', linewidth=2, alpha=0.8, label='Actual')
+            ax.plot(
+                range(len(ts_values), len(ts_values) + horizon),
+                forecast_values,
+                'r-', linewidth=2, alpha=0.8,
+                label='Forecast'
+            )
         
-        ax.set_title(f'Forecast for {target_var} (Next {horizon} periods)')
-        ax.set_xlabel('Time')
-        ax.set_ylabel(target_var)
-        ax.legend()
+        ax.set_title(f'ARIMA Forecast for {target_var} (Next {horizon} periods)', fontsize=14)
+        ax.set_xlabel('Time', fontsize=12)
+        ax.set_ylabel(target_var, fontsize=12)
+        ax.legend(fontsize=10)
         
+        # Add grid for readability
+        ax.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
         return fig
     
     # ----- Metrics Calculation -----
