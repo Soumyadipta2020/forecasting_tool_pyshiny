@@ -1,3 +1,12 @@
+#!/usr/bin/env python3
+"""
+Server-side logic for the AI Forecasting Application.
+
+This module defines the server functions that handle reactive data flow,
+data processing, and forecasting models.
+"""
+
+# ===== IMPORTS =====
 from shiny import reactive, render
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -6,13 +15,30 @@ from statsmodels.tsa.arima.model import ARIMA
 import numpy as np
 from global_helpers import calculate_metrics
 
+# ===== MAIN SERVER FUNCTION =====
 def server_function(input, output, session):
+    """
+    Main server function for the Shiny application.
+    
+    Handles reactive data flow, user inputs, and output rendering.
+    
+    Parameters:
+    -----------
+    input : InputInterface
+        User input values from UI components
+    output : OutputInterface 
+        Interface for rendering outputs
+    session : SessionContext
+        The current session context
+    """
+    # ----- Reactive Values -----
     # Store uploaded data
     data = reactive.Value(None)
     
-    # Handle file upload
+    # ----- File Upload Handler -----
     @reactive.effect
     def _():
+        """Handle file upload and update variable dropdowns."""
         file_info = input.file()
         if file_info and len(file_info) > 0:
             file_path = file_info[0]["datapath"]
@@ -34,17 +60,24 @@ def server_function(input, output, session):
                 selected=numeric_cols[0] if len(numeric_cols) > 0 else None
             )
     
-    # Render data table
+    # ----- Data Preview -----
     @output
     @render.data_frame
     def uploaded_data():
+        """Render the uploaded data preview."""
         if data.get() is not None:
             return data.get()
         return pd.DataFrame()
     
-    # Run forecast when button is clicked
+    # ----- Forecast Runner -----
     @reactive.effect
     def _():
+        """
+        Process forecast request when button is clicked.
+        
+        Collects input parameters, validates them, and calls the
+        appropriate forecasting model function.
+        """
         # Only run when button is clicked
         if not input.run_forecast() or data.get() is None:
             return
@@ -69,10 +102,11 @@ def server_function(input, output, session):
         elif model_type == "auto_arima":
             run_arima_forecast(ts_data, time_var, target_var, horizon, output)
     
-    # Initialize empty plot and metrics
+    # ----- Initial Plot and Metrics -----
     @output
     @render.plot
     def forecast_plot():
+        """Render the initial empty forecast plot."""
         fig, ax = plt.subplots(figsize=(10, 6))
         ax.text(
             0.5, 0.5,
@@ -85,19 +119,38 @@ def server_function(input, output, session):
     @output
     @render.table
     def forecast_metrics():
+        """Render the initial empty metrics table."""
         return pd.DataFrame({
             'Metric': ['Note'],
             'Value': ["Run a forecast to see metrics"]
         })
 
+# ===== FORECASTING MODELS =====
 def run_prophet_forecast(ts_data, time_var, target_var, horizon, output):
-    # Prophet model
+    """
+    Run Facebook Prophet forecasting model.
+    
+    Parameters:
+    -----------
+    ts_data : pandas.DataFrame
+        Time series data for forecasting
+    time_var : str
+        Column name for time variable
+    target_var : str
+        Column name for target variable
+    horizon : int
+        Number of periods to forecast
+    output : OutputInterface
+        Interface for rendering outputs
+    """
+    # ----- Data Preparation -----
     prophet_df = ts_data.rename(columns={time_var: 'ds', target_var: 'y'})
     
     # Convert to datetime if not already
     if not pd.api.types.is_datetime64_any_dtype(prophet_df['ds']):
         prophet_df['ds'] = pd.to_datetime(prophet_df['ds'])
-        
+    
+    # ----- Model Training -----    
     model = Prophet(
         yearly_seasonality=True,
         weekly_seasonality=True,
@@ -105,13 +158,15 @@ def run_prophet_forecast(ts_data, time_var, target_var, horizon, output):
     )
     model.fit(prophet_df)
     
+    # ----- Forecast Generation -----
     future = model.make_future_dataframe(periods=horizon, freq='D')
     forecast = model.predict(future)
     
-    # Create forecast plot
+    # ----- Plot Rendering -----
     @output
     @render.plot
     def forecast_plot():
+        """Render the Prophet forecast plot."""
         fig, ax = plt.subplots(figsize=(10, 6))
         
         # Plot actual values
@@ -135,7 +190,7 @@ def run_prophet_forecast(ts_data, time_var, target_var, horizon, output):
         
         return fig
     
-    # Calculate metrics
+    # ----- Metrics Calculation -----
     actual = prophet_df['y'].values
     predicted = forecast['yhat'][:len(actual)].values
     
@@ -144,24 +199,41 @@ def run_prophet_forecast(ts_data, time_var, target_var, horizon, output):
     @output
     @render.table
     def forecast_metrics():
+        """Render the Prophet forecast metrics table."""
         return metrics_df
 
 def run_arima_forecast(ts_data, time_var, target_var, horizon, output):
-    # Auto ARIMA model
-    # Convert time series data
+    """
+    Run Auto ARIMA forecasting model.
+    
+    Parameters:
+    -----------
+    ts_data : pandas.DataFrame
+        Time series data for forecasting
+    time_var : str
+        Column name for time variable
+    target_var : str
+        Column name for target variable
+    horizon : int
+        Number of periods to forecast
+    output : OutputInterface
+        Interface for rendering outputs
+    """
+    # ----- Data Preparation -----
     ts_values = ts_data[target_var].values
     
-    # Fit ARIMA model
+    # ----- Model Training -----
     model = ARIMA(ts_values, order=(1, 1, 1))
     model_fit = model.fit()
     
-    # Make forecast
+    # ----- Forecast Generation -----
     forecast_values = model_fit.forecast(steps=horizon)
     
-    # Create forecast plot
+    # ----- Plot Rendering -----
     @output
     @render.plot
     def forecast_plot():
+        """Render the ARIMA forecast plot."""
         fig, ax = plt.subplots(figsize=(10, 6))
         
         # Plot actual values
@@ -182,7 +254,7 @@ def run_arima_forecast(ts_data, time_var, target_var, horizon, output):
         
         return fig
     
-    # Calculate metrics
+    # ----- Metrics Calculation -----
     predicted = model_fit.fittedvalues
     actual = ts_values[1:len(predicted)+1]  # Adjust for any differences in length
     
@@ -191,4 +263,5 @@ def run_arima_forecast(ts_data, time_var, target_var, horizon, output):
     @output
     @render.table
     def forecast_metrics():
+        """Render the ARIMA forecast metrics table."""
         return metrics_df 
