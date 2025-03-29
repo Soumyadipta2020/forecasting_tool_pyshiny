@@ -50,49 +50,96 @@ app_ui = ui.page_fluid(
             ui.navset_tab(
                 ui.nav_panel(
                     "Data",
-                    ui.div(
-                        ui.h3("Select Data Source"),
-                        ui.input_select(
-                            "data_source",
-                            "Select Data Source",
-                            choices=["Upload", "Database", "API"]
-                        ),
-                        ui.input_file("file", "Upload Your File (.csv supported)", accept=[".csv"]),
+                    ui.page_fluid(
                         ui.div(
-                            ui.download_button(
-                                "download_template", 
-                                "Download template file",
-                                icon=ui.tags.i(class_="fas fa-download"),
-                                class_="btn-info"
+                            ui.h3("Select Data Source"),
+                            ui.input_select(
+                                "data_source",
+                                "Select Data Source",
+                                choices=["Upload", "Database", "API"]
                             ),
-                            ui.input_action_button(
-                                "upload_data_btn", 
-                                "Upload data",
-                                icon=ui.tags.i(class_="fas fa-upload"),
-                                class_="btn-primary"
+                            ui.input_file("file", "Upload Your File (.csv supported)", accept=[".csv"]),
+                            ui.div(
+                                ui.download_button(
+                                    "download_template", 
+                                    "Download template file",
+                                    icon=ui.tags.i(class_="fas fa-download"),
+                                    class_="btn-info"
+                                ),
+                                ui.input_action_button(
+                                    "upload_data_btn", 
+                                    "Upload data",
+                                    icon=ui.tags.i(class_="fas fa-upload"),
+                                    class_="btn-primary"
+                                ),
+                                class_="d-flex justify-content-between my-3"
                             ),
-                            class_="d-flex justify-content-between my-3"
-                        ),
-                        ui.div(
-                            class_="text-danger small",
-                            content="Please click after editing (if needed) the table below"
-                        ),
-                        ui.div(
-                            ui.h3("Edit Data"),
-                            ui.output_data_frame("uploaded_data"),
-                            class_="card p-3 mt-3"
-                        ),
-                        ui.div(
-                            ui.h3("Quick Visualization"),
-                            ui.output_plot("data_viz"),
-                            class_="card p-3 mt-3"
-                        ),
-                        class_="card-body"
-                    )
+                            ui.div(
+                                class_="text-danger small",
+                                content="Please click after editing (if needed) the table below"
+                            ),
+                            ui.div(
+                                ui.h3("Edit Data"),
+                                ui.output_data_frame("uploaded_data"),
+                                class_="card p-3 mt-3"
+                            ),
+                            ui.div(
+                                ui.h3("Quick Visualization"),
+                                ui.output_plot("data_viz"),
+                                class_="card p-3 mt-3"
+                            ),
+                            class_="card-body"
+                        )
+                    ),
                 ),
                 ui.nav_panel(
                     "Summary Statistics",
-                    ui.output_table("summary_stats")
+                    ui.page_fluid(
+                        ui.br(),
+                        ui.card(
+                            ui.card_header(
+                                "Summary Statistics"
+                            ),
+                            ui.card_body(
+                                ui.download_button(
+                                    "download_summary_stats",
+                                    "Download Summary Statistics",
+                                    icon=ui.tags.i(class_="fas fa-download")
+                                ),
+                                ui.output_table("summary_stats")
+                            )
+                        ),
+                        ui.card(
+                            ui.card_header(
+                                "Visualization",
+                                ui.span(
+                                    ui.input_action_button(
+                                        "viz_collapse_btn",
+                                        "",
+                                        icon=ui.tags.i(class_="fas fa-minus"),
+                                        class_="btn-sm btn-link text-light"
+                                    ),
+                                    class_="float-end"
+                                )
+                            ),
+                            ui.card_body(
+                                ui.div(
+                                    ui.h4("Plot Type"),
+                                    ui.input_select(
+                                        "plot_type",
+                                        "",
+                                        choices=[
+                                            "Boxplot",
+                                            "Violin Plot",
+                                            "Histogram"
+                                        ],
+                                        selected="Violin Plot"
+                                    ),
+                                    ui.output_plot("stats_viz")
+                                )
+                            )
+                        )
+                    )
                 ),
                 id="home_tabs"
             )  

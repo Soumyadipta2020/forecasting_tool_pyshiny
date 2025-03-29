@@ -20,7 +20,7 @@ $(document).ready(function() {
     <nav class="navbar navbar-expand-lg navbar-dark">
       <div class="container-fluid">
         <a class="navbar-brand" href="#">
-          <i class="fas fa-brain"></i> AI Forecasting App <span class="version-badge" style='border-radius: 10px; font-size: small; background-color: #545454;'>&nbsp; v.0.0.1 &nbsp;</span>
+          <i class="fas fa-brain"></i> AI Forecasting App <span class="version-badge" style='border-radius: 10px; font-size: small; background-color: #545454;'>&nbsp; v.0.03.3 &nbsp;</span>
         </a>
         <div class="ms-auto dark-mode-toggle">
           <!-- Dark mode toggle gets placed here by shiny -->
@@ -61,4 +61,33 @@ $(document).ready(function() {
     // Add footer to the appropriate location
     //$('.container-fluid').append(footer);
   }, 600);
+  
+  // ----- Card Collapse functionality -----
+  // Listen for button click events for summary statistics section
+  $(document).on('click', '#summary_collapse_btn', function() {
+    var icon = $(this).find('i');
+    var cardBody = $(this).closest('.card').find('.card-body');
+    
+    if (cardBody.is(':visible')) {
+      cardBody.hide();
+      icon.removeClass('fa-minus').addClass('fa-plus');
+    } else {
+      cardBody.show();
+      icon.removeClass('fa-plus').addClass('fa-minus');
+    }
+  });
+  
+  // Listen for button click events for visualization section
+  $(document).on('click', '#viz_collapse_btn', function() {
+    var icon = $(this).find('i');
+    var cardBody = $(this).closest('.card').find('.card-body');
+    
+    if (cardBody.is(':visible')) {
+      cardBody.hide();
+      icon.removeClass('fa-minus').addClass('fa-plus');
+    } else {
+      cardBody.show();
+      icon.removeClass('fa-plus').addClass('fa-minus');
+    }
+  });
 }); 

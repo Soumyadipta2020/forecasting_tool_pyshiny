@@ -81,9 +81,45 @@ body {
 }
 
 .card-header {
-  background-color: #f8f9fa;
+  background-color: #0076d7;
+  color: white;
   border-bottom: 1px solid #e9ecef;
   font-weight: 600;
+}
+
+/* ----- Statistics Cards ----- */
+#home_tabs-Summary\ Statistics .card-header {
+  background-color: #0076d7;
+  color: white;
+  font-weight: 600;
+  padding: 0.75rem 1.25rem;
+}
+
+#home_tabs-Summary\ Statistics .card-body {
+  padding: 1rem;
+  background-color: white;
+}
+
+#summary_collapse_btn,
+#viz_collapse_btn {
+  background: none;
+  border: none;
+  color: white;
+}
+
+#summary_collapse_btn:hover,
+#viz_collapse_btn:hover {
+  opacity: 0.8;
+}
+
+#download_summary_stats {
+  margin-bottom: 1rem;
+}
+
+/* ----- Plot Type Dropdown ----- */
+#plot_type {
+  margin-bottom: 1rem; 
+  max-width: 300px;
 }
 
 /* ----- Button styling ----- */

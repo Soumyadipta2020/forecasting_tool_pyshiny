@@ -15,6 +15,7 @@ from statsmodels.tsa.arima.model import ARIMA
 import numpy as np
 from global_helpers import calculate_metrics
 import seaborn as sns
+from io import StringIO
 
 # ===== MAIN SERVER FUNCTION =====
 def server_function(input, output, session):
@@ -163,6 +164,97 @@ def server_function(input, output, session):
         
         return stats
     
+    # ----- Summary Statistics Visualization -----
+    @output
+    @render.plot
+    def stats_viz():
+        """Render statistical visualizations based on selected plot type."""
+        if data.get() is None:
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.text(
+                0.5, 0.5,
+                "Upload data to see visualization",
+                ha='center', va='center',
+                transform=ax.transAxes
+            )
+            return fig
+            
+        df = data.get()
+        numeric_df = df.select_dtypes(include=['number'])
+        
+        if numeric_df.empty:
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.text(
+                0.5, 0.5,
+                "No numeric columns found for visualization",
+                ha='center', va='center',
+                transform=ax.transAxes
+            )
+            return fig
+            
+        plot_type = input.plot_type()
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
+        if plot_type == "Boxplot":
+            sns.boxplot(data=numeric_df, ax=ax)
+            ax.set_title("Boxplot of Numeric Variables")
+            ax.set_xlabel("Variables")
+            ax.set_ylabel("Values")
+            plt.xticks(rotation=45)
+            
+        elif plot_type == "Violin Plot":
+            sns.violinplot(data=numeric_df, ax=ax)
+            ax.set_title("Violin Plot of Numeric Variables")
+            ax.set_xlabel("Variables")
+            ax.set_ylabel("Values")
+            plt.xticks(rotation=45)
+            
+        elif plot_type == "Histogram":
+            # Create a subplot for each numeric column
+            plt.close(fig)  # Close the previous figure
+            n_cols = len(numeric_df.columns)
+            n_rows = (n_cols + 1) // 2  # Ceiling division
+            
+            fig, axes = plt.subplots(n_rows, min(n_cols, 2), figsize=(12, 3*n_rows))
+            axes = axes.flatten() if n_cols > 1 else [axes]
+            
+            for i, col in enumerate(numeric_df.columns):
+                if i < len(axes):
+                    sns.histplot(numeric_df[col], kde=True, ax=axes[i])
+                    axes[i].set_title(f"Histogram of {col}")
+            
+            # Hide any unused subplots
+            for j in range(i + 1, len(axes)):
+                axes[j].set_visible(False)
+            
+        plt.tight_layout()
+        return fig
+    
+    # ----- Download Summary Statistics -----
+    @output
+    @render.download(filename="summary_statistics.csv")
+    def download_summary_stats():
+        """Handle summary statistics download."""
+        if data.get() is None:
+            return "No data available"
+        
+        df = data.get()
+        numeric_df = df.select_dtypes(include=['number'])
+        
+        if numeric_df.empty:
+            return "No numeric data available"
+        
+        # Calculate statistics
+        stats = numeric_df.describe().T
+        stats['skew'] = numeric_df.skew()
+        stats['kurtosis'] = numeric_df.kurtosis()
+        stats = stats.round(2)
+        stats = stats.reset_index().rename(columns={'index': 'variable'})
+        
+        # Convert to CSV
+        return stats.to_csv(index=False)
+    
     # ----- Forecast Runner -----
     @reactive.effect
     def _():
@@ -229,14 +321,17 @@ def server_function(input, output, session):
     @render.download(filename="sample_data.csv")
     def download_template():
         """Handle template file download."""
-        if not input.download_template:
-            return None
-            
-        def generate_content():
-            with open("www/timeseries_demo.csv", "r") as file:
-                return file.read()
-                
-        return generate_content
+        # Read the CSV file into a DataFrame
+        sample_data = pd.read_csv("timeseries_demo.csv")
+        # Create a buffer to hold the CSV data
+        buffer = StringIO()
+        # Write the DataFrame to the buffer in CSV format
+        sample_data.to_csv(buffer, index=False)
+        # Seek to the beginning of the buffer
+        buffer.seek(0)
+        # Yield the buffer's contents
+        yield buffer.getvalue()
+
 
 # ===== FORECASTING MODELS =====
 def run_prophet_forecast(ts_data, time_var, target_var, horizon, output):
