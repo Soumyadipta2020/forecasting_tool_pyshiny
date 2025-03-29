@@ -1,0 +1,12 @@
+{
+    "https://api.shinyapps.io": {
+        "server_url": "https://api.shinyapps.io",
+        "filename": "C:\\Users\\soumy\\OneDrive\\Coding\\pyshiny\\forecasting_tool_pyshiny",
+        "app_url": "https://soumyadipta-das-stat.shinyapps.io/ai_forecasting_app_pyshiny/",
+        "app_id": 14373536,
+        "app_guid": null,
+        "title": "ai_forecasting_app_pyshiny",
+        "app_mode": "python-shiny",
+        "app_store_version": 1
+    }
+}
