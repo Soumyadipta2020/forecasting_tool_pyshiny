@@ -142,7 +142,7 @@ app_ui = ui.page_fluid(
                     )
                 ),
                 id="home_tabs"
-            )  
+            )
         ),
         ui.nav_panel(
             "Forecast",
@@ -188,7 +188,7 @@ app_ui = ui.page_fluid(
                 ui.h3("About"),
                 ui.p("This is an AI-powered forecasting application built with PyShiny."),
                 ui.p("Author: Soumyadipta Das"),
-                ui.p("Version: 0.03.3"),
+                ui.p("Version: 0.0.1"),
                 class_="card p-3"
             )
         ),
