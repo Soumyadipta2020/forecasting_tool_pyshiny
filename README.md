@@ -1,5 +1,12 @@
 # AI Forecasting App
 
+## Directory Structure Update (July 2025)
+
+The `helpers` folder and `global_helpers.py` have been moved into a new `server_scripts` folder for better modularity. Please update your imports accordingly:
+
+- Use `from server_scripts.global_helpers import ...` instead of `from global_helpers import ...`
+- Use `from server_scripts.helpers import ...` for helper modules.
+
 A PyShiny application for time series forecasting using various AI and statistical models.
 
 ## Features
