@@ -1,7 +1,9 @@
 from shiny import ui
+from ui_scripts.components.common_ui import nav_panel, action_button, download_button
+
 
 def summary_tab():
-    return ui.nav_panel(
+    return nav_panel(
         "Summary Statistics",
         ui.page_fluid(
             ui.br(),
@@ -10,10 +12,10 @@ def summary_tab():
                     "Summary Statistics"
                 ),
                 ui.card_body(
-                    ui.download_button(
+                    download_button(
                         "download_summary_stats",
                         "Download Summary Statistics",
-                        icon=ui.tags.i(class_="fas fa-download")
+                        icon_class="fas fa-download",
                     ),
                     ui.output_table("summary_stats")
                 )
@@ -22,11 +24,11 @@ def summary_tab():
                 ui.card_header(
                     "Visualization",
                     ui.span(
-                        ui.input_action_button(
+                        action_button(
                             "viz_collapse_btn",
                             "",
-                            icon=ui.tags.i(class_="fas fa-minus"),
-                            class_="btn-sm btn-link text-light"
+                            icon_class="fas fa-minus",
+                            class_="btn-sm btn-link text-light",
                         ),
                         class_="float-end"
                     )

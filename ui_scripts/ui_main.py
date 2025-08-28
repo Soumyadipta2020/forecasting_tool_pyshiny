@@ -8,11 +8,11 @@ organized by functional sections.
 
 # ===== IMPORTS =====
 from shiny import ui
-from ui_scripts.custom_head import custom_head
-from ui_scripts.data_tab import data_tab
-from ui_scripts.summary_tab import summary_tab
-from ui_scripts.forecast_tab import forecast_tab
-from ui_scripts.about_tab import about_tab
+from ui_scripts.components.custom_head import custom_head
+from ui_scripts.components.data_tab import data_tab
+from ui_scripts.components.summary_tab import summary_tab
+from ui_scripts.components.forecast_tab import forecast_tab
+from ui_scripts.components.about_tab import about_tab
 
 # ===== UI DEFINITION =====
 app_ui = ui.page_fluid(
