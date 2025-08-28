@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+import sys
+# Prevent writing .pyc files during runs
+sys.dont_write_bytecode = True
 """
 Main application module for the AI Forecasting Application.
 
@@ -7,7 +10,7 @@ This is the entry point for the Shiny application that connects the UI and serve
 
 # ===== IMPORTS =====
 from shiny import App
-from ui import app_ui
+from ui_scripts.ui_main import app_ui
 from server import server_function
 import os
 

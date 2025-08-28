@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+import sys
+# Prevent writing .pyc files during runs
+sys.dont_write_bytecode = True
 """
 Run script for the AI Forecasting Application.
 
