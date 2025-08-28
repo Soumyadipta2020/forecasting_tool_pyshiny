@@ -1,0 +1,25 @@
+# Development requirements for local development and conversion of a Shiny for Python app
+# - Use this when developing locally (outside Shinylive) and when you want tools to build/convert a local copy of shinylive.
+# - Install with: pip install -r requirements-dev.txt
+
+# Base project requirements (keeps parity with production/runtime)
+-r requirements.txt
+
+# Development / tooling
+black>=23.1.0
+ruff>=0.12.0
+isort>=5.12.0
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pre-commit>=2.20.0
+wheel>=0.38.0
+build>=0.10.0
+
+# Optional: tools that may help when converting or running a local copy of shinylive.
+# Uncomment if you have a local pip-installable version or a compatible package available.
+# shinylive>=0.1.0
+# nodeenv (if you use node tooling inside a virtualenv) - not a pip package for Node itself
+
+# Notes:
+# - Keeping the runtime packages inside `requirements.txt` and referencing it (-r) avoids duplication.
+# - Pin or relax versions as needed for your environment.
