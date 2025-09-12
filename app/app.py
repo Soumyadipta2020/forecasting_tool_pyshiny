@@ -11,7 +11,7 @@ This is the entry point for the Shiny application that connects the UI and serve
 # ===== IMPORTS =====
 from shiny import App
 from ui_scripts.ui_main import app_ui
-from server import server_function
+from server_scripts.server_main import server_function
 import os
 
 # ===== APP CREATION =====
