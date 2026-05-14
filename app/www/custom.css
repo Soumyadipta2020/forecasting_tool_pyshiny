@@ -1,184 +1,214 @@
-/* ===== Custom styling for AI Forecasting App ===== */
-
-/* ----- Global styling ----- */
 body {
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #f5f7fb;
 }
 
-/* ----- Header styling ----- */
 .navbar {
-  background-color: #0076d7 !important;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgba(24, 39, 75, 0.16);
 }
 
 .navbar-brand {
-  color: white !important;
-  font-weight: bold;
-  font-size: 1.2rem;
+  font-weight: 700;
 }
 
-.navbar .navbar-nav .nav-link {
-  color: white !important;
+.brand-logo {
+  margin-right: 0.45rem;
 }
 
-/* Dark mode toggle styling */
-.dark-mode-toggle {
-  padding: 0.5rem;
+.version-badge {
+  display: inline-block;
+  margin-left: 0.3rem;
+  padding: 0.1rem 0.55rem;
+  border-radius: 8px;
+  background: #545454;
+  color: #fff;
+  font-size: 0.76rem;
+  font-weight: 600;
+  vertical-align: middle;
 }
 
-.dark-mode-toggle .form-check {
-  margin-bottom: 0;
-}
-
-.dark-mode-toggle .form-check-input:checked {
-  background-color: #fff;
-  border-color: #fff;
-}
-
-.dark-mode-toggle label {
-  color: white;
-}
-
-.dark-mode-toggle i {
-  font-size: 1.2rem;
-  color: white;
-}
-
-/* ----- Sidebar styling ----- */
-.nav-pills {
-  background-color: #2c3e50;
-}
-
-.nav-pills .nav-link {
-  color: white !important;
-  border-radius: 0;
-  border-left: 3px solid transparent;
-  padding: 15px 20px;
-  transition: all 0.3s;
-}
-
-.nav-pills .nav-link.active {
-  background-color: #3498db !important;
-  border-left: 3px solid white;
-}
-
-.nav-pills .nav-link:hover:not(.active) {
-  background-color: rgba(255, 255, 255, 0.1) !important;
-  border-left: 3px solid #3498db;
-}
-
-/* ----- Icon styling ----- */
-.nav-pills .nav-link i {
-  margin-right: 10px;
-}
-
-/* ----- Card/Panel styling ----- */
 .card {
-  border-radius: 3px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  border: none;
-  margin-bottom: 20px;
-}
-
-.card-header {
-  background-color: #0076d7;
-  color: white;
-  border-bottom: 1px solid #e9ecef;
-  font-weight: 600;
-}
-
-/* ----- Statistics Cards ----- */
-#home_tabs-Summary\ Statistics .card-header {
-  background-color: #0076d7;
-  color: white;
-  font-weight: 600;
-  padding: 0.75rem 1.25rem;
-}
-
-#home_tabs-Summary\ Statistics .card-body {
-  padding: 1rem;
-  background-color: white;
-}
-
-#summary_collapse_btn,
-#viz_collapse_btn {
-  background: none;
-  border: none;
-  color: white;
-}
-
-#summary_collapse_btn:hover,
-#viz_collapse_btn:hover {
-  opacity: 0.8;
-}
-
-#download_summary_stats {
+  border: 1px solid #dfe5ee;
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(24, 39, 75, 0.08);
   margin-bottom: 1rem;
 }
 
-/* ----- Plot Type Dropdown ----- */
-#plot_type {
-  margin-bottom: 1rem; 
-  max-width: 300px;
+.card-header {
+  background: #ffffff;
+  border-bottom: 1px solid #dfe5ee;
+  color: #1d2a3a;
+  font-weight: 700;
 }
 
-/* ----- Button styling ----- */
-.btn {
-  border-radius: 10px;
-  padding: 0.5rem 1rem;
-  transition: all 0.2s ease;
+.btn,
+.form-control,
+.form-select {
+  border-radius: 8px;
 }
 
-.btn-primary {
-  background-color: #0076d7;
-  border-color: #0076d7;
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+  margin-top: 1rem;
 }
 
-.btn-primary:hover {
-  background-color: #0062b1;
-  border-color: #0062b1;
+.button-column {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 1rem;
 }
 
-.btn-info {
-  border-radius: 10px;
-  background-color: #17a2b8;
-  border-color: #17a2b8;
+.data-main-panel {
+  min-width: 0;
 }
 
-.btn-info:hover {
-  background-color: #138496;
-  border-color: #138496;
+.summary-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  margin: 0.85rem 0 1rem;
 }
 
-/* ----- Tab styling ----- */
-.nav-tabs {
-  border-bottom: 1px solid #dee2e6;
+.summary-table-wrap table {
+  width: 100%;
+  margin-bottom: 0;
 }
 
-.nav-tabs .nav-link {
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: #495057;
+.summary-table {
+  font-size: 0.93rem;
 }
 
-.nav-tabs .nav-link.active {
-  border: none;
-  border-bottom: 2px solid #0076d7;
-  color: #0076d7;
-  background-color: transparent;
+.summary-table-wrap th,
+.summary-table-wrap td {
+  white-space: nowrap;
+  text-align: right;
 }
 
-/* ----- Form controls ----- */
-.form-control, .form-select, .custom-file-label {
-  border-radius: 10px;
-  border: 1px solid #ced4da;
+.summary-table-wrap th:first-child,
+.summary-table-wrap td:first-child {
+  text-align: left;
 }
 
-/* ----- Footer styling ----- */
-.footer {
-  border-top: 1px solid #e9ecef;
-  padding: 10px 15px;
-  font-size: 0.85rem;
-  color: #6c757d;
-  background-color: #f8f9fa;
-} 
+.stat-grid,
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.stat-card {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  min-height: 92px;
+  padding: 1rem;
+  border: 1px solid #dfe5ee;
+  border-left-width: 5px;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.stat-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 8px;
+  background: #eef3f8;
+  color: #1f6feb;
+}
+
+.stat-value {
+  font-size: 1.35rem;
+  font-weight: 750;
+  color: #142033;
+}
+
+.stat-label,
+.metric-label {
+  color: #5c6b7a;
+  font-size: 0.88rem;
+}
+
+.metric-card {
+  min-height: 88px;
+  padding: 1rem;
+  border-radius: 8px;
+  color: #fff;
+}
+
+.metric-card .metric-label {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.metric-value {
+  font-size: 1.45rem;
+  font-weight: 800;
+}
+
+.chat-history {
+  min-height: 320px;
+  max-height: 460px;
+  overflow-y: auto;
+  padding: 0.75rem;
+  border: 1px solid #dfe5ee;
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.chat-message {
+  padding: 0.75rem;
+  border: 1px solid #dfe5ee;
+  border-radius: 8px;
+  margin-bottom: 0.75rem;
+  background: #fff;
+}
+
+.chat-user {
+  border-left: 4px solid #1f6feb;
+}
+
+.chat-assistant {
+  border-left: 4px solid #2da44e;
+}
+
+.chat-role {
+  margin-bottom: 0.35rem;
+  font-weight: 750;
+  color: #1d2a3a;
+}
+
+.tick-list {
+  margin-bottom: 0;
+}
+
+.app-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  color: #5c6b7a;
+  border-top: 1px solid #dfe5ee;
+  background: #fff;
+}
+
+@media (max-width: 900px) {
+  .stat-grid,
+  .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .stat-grid,
+  .metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .button-row .btn {
+    width: 100%;
+  }
+}

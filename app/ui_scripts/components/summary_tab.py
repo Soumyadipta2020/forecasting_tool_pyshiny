@@ -1,54 +1,54 @@
 from shiny import ui
-from ui_scripts.components.common_ui import nav_panel, action_button, download_button
+
+
+def _icon(name: str):
+    return ui.tags.i(class_=f"fa-solid fa-{name}")
 
 
 def summary_tab():
-    return nav_panel(
+    return ui.nav_panel(
         "Summary Statistics",
-        ui.page_fluid(
-            ui.br(),
-            ui.card(
-                ui.card_header(
-                    "Summary Statistics"
-                ),
-                ui.card_body(
-                    download_button(
-                        "download_summary_stats",
-                        "Download Summary Statistics",
-                        icon_class="fas fa-download",
-                    ),
-                    ui.output_table("summary_stats")
-                )
+        ui.card(
+            ui.card_header(_icon("chart-pie"), " Summary Statistics"),
+            ui.output_ui("summary_status"),
+            ui.input_selectize(
+                "vars_stat_selected",
+                "Select Variables",
+                choices=[],
+                multiple=True,
             ),
-            ui.card(
-                ui.card_header(
-                    "Visualization",
-                    ui.span(
-                        action_button(
-                            "viz_collapse_btn",
-                            "",
-                            icon_class="fas fa-minus",
-                            class_="btn-sm btn-link text-light",
-                        ),
-                        class_="float-end"
-                    )
-                ),
-                ui.card_body(
-                    ui.div(
-                        ui.h4("Plot Type"),
-                        ui.input_select(
-                            "plot_type",
-                            "",
-                            choices=[
-                                "Boxplot",
-                                "Violin Plot",
-                                "Histogram"
-                            ],
-                            selected="Violin Plot"
-                        ),
-                        ui.output_plot("stats_viz")
-                    )
-                )
-            )
-        )
+            ui.div(
+                ui.output_data_frame("summary_stat_table"),
+                class_="summary-table-wrap",
+            ),
+            ui.download_button(
+                "summary_stat_download",
+                "Download Summary Statistics",
+                icon=_icon("download"),
+                class_="btn-info",
+            ),
+            full_screen=True,
+        ),
+        ui.card(
+            ui.card_header(_icon("chart-simple"), " Visualization"),
+            ui.input_select(
+                "summary_stat_plot_type",
+                "Plot Type",
+                choices=["Boxplot", "Violin Plot", "Histogram"],
+                selected="Violin Plot",
+            ),
+            ui.output_plot("summary_stat_vis", height="460px"),
+            full_screen=True,
+        ),
+        ui.card(
+            ui.card_header(_icon("arrow-right"), " Next Step"),
+            ui.p("Review the summary statistics and visualization, then continue to forecasting."),
+            ui.input_action_button(
+                "implement_forecasting",
+                "Implement Forecasting",
+                icon=_icon("chart-line"),
+                class_="btn-primary",
+            ),
+        ),
+        value="summary",
     )

@@ -1,49 +1,81 @@
 from shiny import ui
-from ui_scripts.components.common_ui import nav_panel, file_input, download_button, action_button
+
+
+def _icon(name: str):
+    return ui.tags.i(class_=f"fa-solid fa-{name}")
 
 
 def data_tab():
-    return nav_panel(
+    return ui.nav_panel(
         "Data",
-        ui.page_fluid(
+        ui.layout_sidebar(
+            ui.sidebar(
+                ui.card(
+                    ui.card_header(_icon("database"), " Data Source"),
+                    ui.input_select(
+                        "data_source",
+                        "Select Data Source",
+                        choices=["Upload", "Sample"],
+                        selected="Upload",
+                    ),
+                    ui.panel_conditional(
+                        "input.data_source === 'Upload'",
+                        ui.input_file(
+                            "file",
+                            "Upload Your File (.csv supported)",
+                            accept=[".csv"],
+                            multiple=False,
+                        ),
+                        ui.output_ui("file_feedback"),
+                    ),
+                    ui.panel_conditional(
+                        "input.data_source === 'Sample'",
+                        ui.input_select(
+                            "sample_data",
+                            "Select Sample Data",
+                            choices=["timeseries demo"],
+                            selected="timeseries demo",
+                        ),
+                        ui.input_action_button(
+                            "load_mongo",
+                            "Load Data",
+                            icon=_icon("cloud-arrow-up"),
+                            class_="btn-primary w-100",
+                        ),
+                    ),
+                    ui.input_select("time_variable", "Select Time Variable", choices=[]),
+                    ui.div(
+                        ui.download_button(
+                            "file_template_download",
+                            "Download template file",
+                            icon=_icon("download"),
+                            class_="btn-info w-100",
+                        ),
+                        ui.input_action_button(
+                            "upload_data",
+                            "Upload data",
+                            icon=_icon("upload"),
+                            class_="btn-primary w-100",
+                        ),
+                        class_="button-column",
+                    ),
+                ),
+                width=340,
+            ),
             ui.div(
-                ui.h3("Select Data Source"),
-                ui.input_select(
-                    "data_source",
-                    "Select Data Source",
-                    choices=["Upload", "Database", "API"],
-                ),
-                file_input("file", "Upload Your File (.csv supported)", accept=[".csv"]),
-                ui.div(
-                    download_button(
-                        "download_template",
-                        "Download template file",
-                        icon_class="fas fa-download",
-                        class_="btn-info",
+                ui.output_ui("info_data"),
+                ui.card(
+                    ui.card_header(_icon("chart-line"), " Quick Visualization"),
+                    ui.layout_columns(
+                        ui.input_select("y_variable_graph", "Select Y Variable", choices=[]),
+                        ui.input_select("x_variables_graph", "Select X Variable", choices=[]),
+                        col_widths=[6, 6],
                     ),
-                    action_button(
-                        "upload_data_btn",
-                        "Upload data",
-                        icon_class="fas fa-upload",
-                        class_="btn-primary",
-                    ),
-                    class_="d-flex justify-content-between my-3",
+                    ui.output_plot("vis_data", height="420px"),
+                    full_screen=True,
                 ),
-                ui.div(
-                    class_="text-danger small",
-                    content="Please click after editing (if needed) the table below",
-                ),
-                ui.div(
-                    ui.h3("Edit Data"),
-                    ui.output_data_frame("uploaded_data"),
-                    class_="card p-3 mt-3",
-                ),
-                ui.div(
-                    ui.h3("Quick Visualization"),
-                    ui.output_plot("data_viz"),
-                    class_="card p-3 mt-3",
-                ),
-                class_="card-body",
-            )
-        )
+                class_="data-main-panel",
+            ),
+        ),
+        value="data",
     )
