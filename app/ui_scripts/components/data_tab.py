@@ -37,7 +37,7 @@ def data_tab():
                             selected="timeseries demo",
                         ),
                         ui.input_action_button(
-                            "load_mongo",
+                            "load_data",
                             "Load Data",
                             icon=_icon("cloud-arrow-up"),
                             class_="btn-primary w-100",

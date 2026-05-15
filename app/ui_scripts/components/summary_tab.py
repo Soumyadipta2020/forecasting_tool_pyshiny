@@ -1,4 +1,5 @@
 from shiny import ui
+from shinywidgets import output_widget
 
 
 def _icon(name: str):
@@ -37,7 +38,7 @@ def summary_tab():
                 choices=["Boxplot", "Violin Plot", "Histogram"],
                 selected="Violin Plot",
             ),
-            ui.output_plot("summary_stat_vis", height="460px"),
+            output_widget("summary_stat_vis", height="460px"),
             full_screen=True,
         ),
         ui.card(

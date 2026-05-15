@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+from pathlib import Path
 import sys
+
 # Prevent writing .pyc files during runs
 sys.dont_write_bytecode = True
 """
@@ -11,9 +13,9 @@ This is the entry point for the Shiny application that connects the UI and serve
 # ===== IMPORTS =====
 from shiny import App
 from ui_scripts.ui_main import app_ui
-from server_scripts.server_main import server_function
-import os
+from server import server_function
 
 # ===== APP CREATION =====
-# Create and run the app
-app = App(app_ui, server_function, static_assets=os.path.join(os.path.dirname(__file__), "www")) 
+# Create the app with the single consolidated server function.
+APP_DIR = Path(__file__).resolve().parent
+app = App(app_ui, server_function, static_assets=str(APP_DIR / "www"))
