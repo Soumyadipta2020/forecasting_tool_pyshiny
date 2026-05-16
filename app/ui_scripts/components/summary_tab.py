@@ -18,10 +18,7 @@ def summary_tab():
                 choices=[],
                 multiple=True,
             ),
-            ui.div(
-                ui.output_data_frame("summary_stat_table"),
-                class_="summary-table-wrap",
-            ),
+            ui.output_data_frame("summary_stat_table"),
             ui.download_button(
                 "summary_stat_download",
                 "Download Summary Statistics",

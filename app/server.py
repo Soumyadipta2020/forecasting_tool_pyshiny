@@ -7,7 +7,9 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 from shiny import reactive, render, ui
+from shinywidgets import render_widget
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -153,3 +155,200 @@ def server_function(input, output, session):
     @render.download(filename="sample_data_template.csv")
     def file_template_download():
         yield pd.read_csv(SAMPLE_FILE).to_csv(index=False)
+
+    def _normalize_selection(selection):
+        if selection is None:
+            return []
+        if isinstance(selection, str):
+            return [selection] if selection else []
+        return [column for column in selection if column]
+
+    def _summary_time_columns(df):
+        time_columns = set()
+        selected_time = input.time_variable()
+        if selected_time in df.columns:
+            time_columns.add(selected_time)
+        time_columns.update(df.select_dtypes(include=["datetime", "datetimetz"]).columns.tolist())
+        return time_columns
+
+    def _summary_variable_choices(df):
+        time_columns = _summary_time_columns(df)
+        return [column for column in df.columns.tolist() if column not in time_columns]
+
+    def _format_summary_value(value):
+        if value is None or pd.isna(value):
+            return ""
+        if isinstance(value, (np.integer, int)):
+            return f"{value:,}"
+        if isinstance(value, (np.floating, float)):
+            return f"{value:,.4f}".rstrip("0").rstrip(".")
+        return str(value)
+
+    def _series_mode(series):
+        modes = series.dropna().mode()
+        if modes.empty:
+            return ""
+        return modes.iloc[0]
+
+    def _summary_statistics(df, selected_columns):
+        rows = [
+            "Data Type",
+            "Observations",
+            "Missing",
+            "Unique",
+            "Sum",
+            "Mean",
+            "Median",
+            "Mode",
+            "Standard Deviation",
+            "Variance",
+            "Minimum",
+            "Maximum",
+            "Skewness",
+            "Kurtosis",
+            "Interquartile Range",
+        ]
+        summary = pd.DataFrame({"Statistic": rows})
+
+        for column in selected_columns:
+            series = df[column]
+            values = {
+                "Data Type": str(series.dtype),
+                "Observations": series.notna().sum(),
+                "Missing": series.isna().sum(),
+                "Unique": series.nunique(dropna=True),
+                "Mode": _series_mode(series),
+            }
+
+            if pd.api.types.is_numeric_dtype(series):
+                numeric_series = pd.to_numeric(series, errors="coerce")
+                values.update(
+                    {
+                        "Sum": numeric_series.sum(skipna=True),
+                        "Mean": numeric_series.mean(skipna=True),
+                        "Median": numeric_series.median(skipna=True),
+                        "Standard Deviation": numeric_series.std(skipna=True),
+                        "Variance": numeric_series.var(skipna=True),
+                        "Minimum": numeric_series.min(skipna=True),
+                        "Maximum": numeric_series.max(skipna=True),
+                        "Skewness": numeric_series.skew(skipna=True),
+                        "Kurtosis": numeric_series.kurt(skipna=True),
+                        "Interquartile Range": numeric_series.quantile(0.75) - numeric_series.quantile(0.25),
+                    }
+                )
+
+            summary[column] = [_format_summary_value(values.get(row)) for row in rows]
+
+        return summary
+
+    def _empty_summary_plot(message):
+        fig = go.Figure()
+        fig.add_annotation(
+            text=message,
+            x=0.5,
+            y=0.5,
+            xref="paper",
+            yref="paper",
+            showarrow=False,
+            font={"size": 16},
+        )
+        fig.update_xaxes(visible=False)
+        fig.update_yaxes(visible=False)
+        fig.update_layout(template="plotly_white", margin={"l": 24, "r": 24, "t": 48, "b": 24})
+        return fig
+
+    @reactive.effect
+    @reactive.event(input.upload_data, ignore_init=True)
+    def _():
+        df = loaded_data()
+        if df is None:
+            ui.update_selectize("vars_stat_selected", choices=[], selected=[], session=session)
+            return
+
+        choices = _summary_variable_choices(df)
+        ui.update_selectize("vars_stat_selected", choices=choices, selected=choices, session=session)
+
+    @reactive.calc
+    def summary_stat_data():
+        df = loaded_data()
+        if df is None:
+            return pd.DataFrame({"Statistic": []})
+
+        selected_columns = [
+            column
+            for column in _normalize_selection(input.vars_stat_selected())
+            if column in _summary_variable_choices(df)
+        ]
+        if not selected_columns:
+            return pd.DataFrame({"Statistic": []})
+
+        return _summary_statistics(df, selected_columns)
+
+    @output
+    @render.ui
+    def summary_status():
+        df = loaded_data()
+        if df is None:
+            return ui.div("Click Upload data in the Data tab to prepare summary statistics.", class_="alert alert-info py-2")
+
+        choices = _summary_variable_choices(df)
+        if not choices:
+            return ui.div("No non-time columns are available for summary statistics.", class_="alert alert-warning py-2")
+
+        selected_columns = _normalize_selection(input.vars_stat_selected())
+        if not selected_columns:
+            return ui.div("Select one or more variables to see summary statistics.", class_="alert alert-info py-2")
+
+        return ui.div("Summary statistics are ready.", class_="alert alert-success py-2")
+
+    @output
+    @render.data_frame
+    def summary_stat_table():
+        df = summary_stat_data()
+        return render.DataGrid(
+            df,
+            width="100%",
+            height="420px",
+            filters=True,
+            selection_mode="none",
+        )
+
+    @output
+    @render.download(filename="summary_stat.csv")
+    def summary_stat_download():
+        yield summary_stat_data().to_csv(index=False)
+
+    @output
+    @render_widget
+    def summary_stat_vis():
+        df = loaded_data()
+        if df is None:
+            return _empty_summary_plot("Click Upload data to prepare summary statistics")
+
+        selected_columns = [
+            column
+            for column in _normalize_selection(input.vars_stat_selected())
+            if column in _summary_variable_choices(df)
+        ]
+        numeric_columns = [column for column in selected_columns if pd.api.types.is_numeric_dtype(df[column])]
+        if not numeric_columns:
+            return _empty_summary_plot("Select at least one numeric variable")
+
+        plot_type = input.summary_stat_plot_type()
+        fig = go.Figure()
+        for column in numeric_columns:
+            series = pd.to_numeric(df[column], errors="coerce").dropna()
+            if plot_type == "Boxplot":
+                fig.add_box(y=series, name=column, boxmean=True)
+            elif plot_type == "Histogram":
+                fig.add_histogram(x=series, name=column, opacity=0.6)
+            else:
+                fig.add_violin(y=series, name=column, box_visible=True, meanline_visible=True)
+
+        fig.update_layout(
+            title=plot_type,
+            template="plotly_white",
+            barmode="overlay" if plot_type == "Histogram" else None,
+            margin={"l": 48, "r": 24, "t": 56, "b": 48},
+        )
+        return fig
