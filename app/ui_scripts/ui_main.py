@@ -11,11 +11,18 @@ from ui_scripts.components.forecast_tab import forecast_tab
 from ui_scripts.components.summary_tab import summary_tab
 
 
+FONT_AWESOME_CSS = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
+
+
 def _icon(name: str):
     return ui.tags.i(class_=f"fa-solid fa-{name}")
 
 
 app_ui = ui.page_navbar(
+    ui.head_content(
+        ui.tags.link(rel="stylesheet", href=FONT_AWESOME_CSS),
+        ui.tags.link(rel="stylesheet", href="custom.css"),
+    ),
     data_tab(),
     summary_tab(),
     forecast_tab(),
@@ -31,6 +38,7 @@ app_ui = ui.page_navbar(
     selected="data",
     navbar_options=ui.navbar_options(bg="#0076d7", theme="dark", underline=True),
     window_title="AI Forecasting App",
+    header=ui.tags.script(src="custom.js"),
     footer=ui.div(
         ui.span(ui.img(src="brand_logo.png", height="22"), " (c) 2023"),
         ui.a("Soumyadipta Das", href="https://sites.google.com/view/soumyadipta-das", target="_blank"),

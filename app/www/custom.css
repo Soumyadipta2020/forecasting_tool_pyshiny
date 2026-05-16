@@ -47,6 +47,17 @@ body {
   border-radius: 8px;
 }
 
+.card-header .fa-solid,
+.btn .fa-solid,
+.shiny-download-link .fa-solid {
+  margin-right: 0.45rem;
+}
+
+.btn .fa-solid,
+.shiny-download-link .fa-solid {
+  line-height: 1;
+}
+
 .button-row {
   display: flex;
   flex-wrap: wrap;

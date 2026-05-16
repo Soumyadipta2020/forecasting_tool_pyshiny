@@ -18,4 +18,4 @@ from server import server_function
 # ===== APP CREATION =====
 # Create the app with the single consolidated server function.
 APP_DIR = Path(__file__).resolve().parent
-app = App(app_ui, server_function, static_assets=str(APP_DIR / "www"))
+app = App(app_ui, server_function, static_assets=APP_DIR / "www")
