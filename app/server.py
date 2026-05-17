@@ -16,6 +16,43 @@ APP_DIR = Path(__file__).resolve().parent
 SAMPLE_FILE = APP_DIR / "timeseries_demo.csv"
 
 
+PLOT_BG = "#1b2638"
+PLOT_GRID = "#334155"
+PLOT_TEXT = "#e5edf8"
+
+
+def _style_matplotlib_axis(fig, ax):
+    fig.patch.set_facecolor(PLOT_BG)
+    ax.set_facecolor(PLOT_BG)
+    ax.tick_params(colors=PLOT_TEXT)
+    ax.xaxis.label.set_color(PLOT_TEXT)
+    ax.yaxis.label.set_color(PLOT_TEXT)
+    ax.title.set_color("#ffffff")
+    for spine in ax.spines.values():
+        spine.set_color("#475569")
+    ax.grid(True, color=PLOT_GRID, alpha=0.38)
+    legend = ax.get_legend()
+    if legend is not None:
+        legend.get_frame().set_facecolor("#111827")
+        legend.get_frame().set_edgecolor("#475569")
+        for text in legend.get_texts():
+            text.set_color(PLOT_TEXT)
+
+
+def _plotly_dark_layout(fig, title=None):
+    fig.update_layout(
+        title=title,
+        template="plotly_dark",
+        paper_bgcolor=PLOT_BG,
+        plot_bgcolor=PLOT_BG,
+        font={"color": PLOT_TEXT},
+        margin={"l": 48, "r": 24, "t": 56, "b": 48},
+    )
+    fig.update_xaxes(gridcolor=PLOT_GRID, zerolinecolor="#475569")
+    fig.update_yaxes(gridcolor=PLOT_GRID, zerolinecolor="#475569")
+    return fig
+
+
 def server_function(input, output, session):
     @reactive.calc
     @reactive.event(input.file, input.load_data, ignore_init=False)
@@ -118,16 +155,18 @@ def server_function(input, output, session):
         df = loaded_data()
         if df is None:
             fig, ax = plt.subplots(figsize=(10, 4))
-            ax.text(0.5, 0.5, "Load data to see visualization", ha="center", va="center", transform=ax.transAxes)
+            ax.text(0.5, 0.5, "Load data to see visualization", ha="center", va="center", color=PLOT_TEXT, transform=ax.transAxes)
             ax.set_axis_off()
+            _style_matplotlib_axis(fig, ax)
             return fig
 
         x_column = input.x_variables_graph()
         y_column = input.y_variable_graph()
         if not x_column or not y_column or x_column not in df.columns or y_column not in df.columns:
             fig, ax = plt.subplots(figsize=(10, 4))
-            ax.text(0.5, 0.5, "Select valid X and Y variables", ha="center", va="center", transform=ax.transAxes)
+            ax.text(0.5, 0.5, "Select valid X and Y variables", ha="center", va="center", color=PLOT_TEXT, transform=ax.transAxes)
             ax.set_axis_off()
+            _style_matplotlib_axis(fig, ax)
             return fig
 
         y_values = pd.to_numeric(df[y_column], errors="coerce")
@@ -146,7 +185,7 @@ def server_function(input, output, session):
         ax.set_title(f"{y_column} over {x_label}", fontsize=12)
         ax.set_xlabel(x_label)
         ax.set_ylabel(y_column)
-        ax.grid(True, alpha=0.2)
+        _style_matplotlib_axis(fig, ax)
         fig.autofmt_xdate()
         plt.tight_layout()
         return fig
@@ -257,9 +296,9 @@ def server_function(input, output, session):
             showarrow=False,
             font={"size": 16},
         )
+        _plotly_dark_layout(fig)
         fig.update_xaxes(visible=False)
         fig.update_yaxes(visible=False)
-        fig.update_layout(template="plotly_white", margin={"l": 24, "r": 24, "t": 48, "b": 24})
         return fig
 
     @reactive.effect
@@ -350,12 +389,8 @@ def server_function(input, output, session):
             else:
                 fig.add_violin(y=series, name=column, box_visible=True, meanline_visible=True)
 
-        fig.update_layout(
-            title=plot_type,
-            template="plotly_white",
-            barmode="overlay" if plot_type == "Histogram" else None,
-            margin={"l": 48, "r": 24, "t": 56, "b": 48},
-        )
+        _plotly_dark_layout(fig, title=plot_type)
+        fig.update_layout(barmode="overlay" if plot_type == "Histogram" else None)
         return fig
 
     forecast_result = reactive.Value(None)
@@ -864,8 +899,9 @@ def server_function(input, output, session):
 
     def _blank_forecast_plot(message):
         fig, ax = plt.subplots(figsize=(11, 4.8))
-        ax.text(0.5, 0.5, message, ha="center", va="center", transform=ax.transAxes)
+        ax.text(0.5, 0.5, message, ha="center", va="center", color=PLOT_TEXT, transform=ax.transAxes)
         ax.set_axis_off()
+        _style_matplotlib_axis(fig, ax)
         return fig
 
     @output
@@ -910,8 +946,8 @@ def server_function(input, output, session):
         ax.set_title(f"Actual vs Forecast: {result['response_column']}", fontsize=13)
         ax.set_xlabel(result.get("x_label", "Sequence"))
         ax.set_ylabel(result["response_column"])
-        ax.grid(True, alpha=0.22)
         ax.legend(loc="best")
+        _style_matplotlib_axis(fig, ax)
         fig.autofmt_xdate()
         plt.tight_layout()
         return fig
