@@ -1,10 +1,4 @@
-# Helper functions for chat features
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 import requests
-import json
 import time
 
 def chat(user_message, history=None, system_prompt="general", api_key=None, temp=0.7):
