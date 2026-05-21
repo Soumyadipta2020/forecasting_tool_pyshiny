@@ -8,7 +8,7 @@ def _icon(name: str):
 
 def summary_tab():
     return ui.nav_panel(
-        "Summary Statistics",
+        ui.span(_icon("chart-pie"), "Summary Statistics", class_="nav-label"),
         ui.card(
             ui.card_header(_icon("chart-pie"), " Summary Statistics"),
             ui.output_ui("summary_status"),

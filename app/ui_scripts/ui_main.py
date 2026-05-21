@@ -14,14 +14,10 @@ from ui_scripts.components.summary_tab import summary_tab
 FONT_AWESOME_CSS = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
 
 
-def _icon(name: str):
-    return ui.tags.i(class_=f"fa-solid fa-{name}")
-
-
 app_ui = ui.page_navbar(
     ui.head_content(
         ui.tags.link(rel="stylesheet", href=FONT_AWESOME_CSS),
-        ui.tags.link(rel="stylesheet", href="custom.css?v=ops-20260521o"),
+        ui.tags.link(rel="stylesheet", href="custom.css?v=ops-20260521p"),
     ),
     data_tab(),
     summary_tab(),

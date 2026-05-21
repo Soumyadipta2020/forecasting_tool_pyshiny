@@ -9,8 +9,6 @@ used across the application components.
 # ===== IMPORTS =====
 import pandas as pd
 import numpy as np
-from prophet import Prophet
-from statsmodels.tsa.arima.model import ARIMA
 import warnings
 
 # ===== GLOBAL SETTINGS =====

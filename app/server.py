@@ -32,15 +32,15 @@ def _plotly_dark_layout(fig, title=None):
             "orientation": "h",
             "x": 0.5,
             "xanchor": "center",
-            "y": -0.1,
+            "y": -0.18,
             "yanchor": "top",
             "bgcolor": "rgba(31, 43, 61, 0)",
             "borderwidth": 0,
         },
-        margin={"l": 48, "r": 24, "t": 48, "b": 48},
+        margin={"l": 48, "r": 24, "t": 48, "b": 76},
     )
-    fig.update_xaxes(gridcolor=PLOT_GRID, zerolinecolor="#475569")
-    fig.update_yaxes(gridcolor=PLOT_GRID, zerolinecolor="#475569")
+    fig.update_xaxes(gridcolor=PLOT_GRID, zerolinecolor="#475569", title_standoff=14)
+    fig.update_yaxes(gridcolor=PLOT_GRID, zerolinecolor="#475569", title_standoff=14)
     return fig
 
 
@@ -410,15 +410,10 @@ def server_function(input, output, session):
         except (TypeError, ValueError):
             return 1
 
-    def _preferred_response_column(df, prefer_summary=False):
+    def _preferred_response_column(df):
         numeric_columns = _numeric_columns(df)
         if not numeric_columns:
             return None
-
-        if prefer_summary:
-            for column in _normalize_selection(input.vars_stat_selected()):
-                if column in numeric_columns:
-                    return column
 
         current_response = input.response_variable()
         if current_response in numeric_columns:
@@ -869,14 +864,14 @@ def server_function(input, output, session):
             "table": result_table,
         }
 
-    def _build_forecast_result(response_column=None, prefer_summary_response=False):
+    def _build_forecast_result():
         df = loaded_data()
         if df is None:
             return _as_error("Load data before running a forecast.")
         if df.empty:
             return _as_error("The loaded data is empty.")
 
-        selected_response = response_column or _preferred_response_column(df, prefer_summary_response)
+        selected_response = _preferred_response_column(df)
         if selected_response is None or selected_response not in df.columns:
             return _as_error("Select a numeric response variable before running a forecast.")
 

@@ -8,7 +8,7 @@ def _icon(name: str):
 
 def data_tab():
     return ui.nav_panel(
-        "Data",
+        ui.span(_icon("database"), "Data", class_="nav-label"),
         ui.div(
             ui.layout_columns(
                 ui.card(

@@ -1,6 +1,10 @@
 from shiny import ui
 
 
+def _icon(name: str):
+    return ui.tags.i(class_=f"fa-solid fa-{name}")
+
+
 CHANGELOGS = [
     (
         "2026-05-21",
@@ -22,7 +26,7 @@ def _change_card(date: str, items: list[str]):
 
 def about_tab():
     return ui.nav_panel(
-        "About",
+        ui.span(_icon("circle-info"), "About", class_="nav-label"),
         ui.card(
             ui.card_header(
                 ui.img(src="brand_logo.png", height="42", class_="me-2"),

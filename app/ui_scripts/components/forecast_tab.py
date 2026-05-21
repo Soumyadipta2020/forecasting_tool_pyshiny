@@ -8,7 +8,7 @@ def _icon(name: str):
 
 def forecast_tab():
     return ui.nav_panel(
-        "Forecasting",
+        ui.span(_icon("chart-line"), "Forecasting", class_="nav-label"),
         ui.div(
             ui.layout_columns(
                 ui.card(
