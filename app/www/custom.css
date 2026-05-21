@@ -59,7 +59,7 @@ main,
 .navbar,
 .navbar.navbar-dark {
   min-height: 72px;
-  padding: 0 1.25rem;
+  padding: 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   background: var(--ops-topbar) !important;
   box-shadow: none;
@@ -67,8 +67,15 @@ main,
 
 .navbar > .container-fluid {
   gap: 1.4rem;
-  padding-right: 0;
-  padding-left: 0;
+  width: 100%;
+  max-width: none;
+  padding-right: 1.25rem;
+  padding-left: 1.25rem;
+}
+
+.navbar-collapse {
+  flex-grow: 1;
+  justify-content: flex-end;
 }
 
 .navbar-brand {
@@ -128,6 +135,7 @@ main,
 .navbar-nav {
   gap: 1.25rem;
   margin-left: auto;
+  justify-content: flex-end;
 }
 
 .navbar .nav-link {
@@ -263,6 +271,14 @@ aside.sidebar,
 .card .html-fill-item,
 .bslib-card .html-fill-container,
 .bslib-card .html-fill-item {
+  background: transparent !important;
+  min-height: 0 !important;
+}
+
+.js-plotly-plot,
+.plotly,
+.plot-container,
+.svg-container {
   background: transparent !important;
 }
 
@@ -526,35 +542,36 @@ label,
 }
 
 .metric-card {
-  min-height: 102px;
-  padding: 1rem;
+  display: grid;
+  align-content: start;
+  min-height: 150px;
+  padding: 1.1rem 1.15rem;
   border: 1px solid var(--ops-border);
   border-top: 3px solid var(--ops-blue);
   border-radius: 8px;
-  background: var(--ops-panel-soft) !important;
+  background: var(--ops-panel) !important;
   color: #ffffff;
+  box-shadow: 0 13px 26px rgba(0, 0, 0, 0.24);
 }
 
-.metric-card.bg-info {
-  border-top-color: var(--ops-cyan);
-}
-
-.metric-card.bg-success {
-  border-top-color: var(--ops-teal);
-}
-
-.metric-card.bg-warning {
-  border-top-color: var(--ops-amber);
-}
-
-.metric-card.bg-danger {
-  border-top-color: var(--ops-red);
+.metric-icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 0.9rem;
+  place-items: center;
+  border: 1px solid rgba(52, 135, 255, 0.38);
+  border-radius: 10px;
+  background: rgba(52, 135, 255, 0.12);
+  color: var(--ops-blue);
+  font-size: 1.05rem;
 }
 
 .metric-value {
   color: #ffffff;
-  font-size: 1.55rem;
+  font-size: clamp(1.65rem, 2vw, 1.95rem);
   font-weight: 950;
+  line-height: 1;
 }
 
 .summary-table-wrap {
@@ -629,11 +646,15 @@ shiny-data-frame .shiny-data-grid > table.filtering > thead > tr.filters > th > 
 pre,
 code,
 .shiny-text-output,
-.form-control-plaintext,
-.shiny-bound-output {
+.form-control-plaintext {
   border-color: var(--ops-border);
   background: var(--ops-panel-deep);
   color: #dbeafe;
+}
+
+.shiny-bound-output {
+  background: transparent !important;
+  color: var(--ops-text);
 }
 
 pre,

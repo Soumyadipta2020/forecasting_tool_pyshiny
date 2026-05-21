@@ -1,4 +1,5 @@
 from shiny import ui
+from shinywidgets import output_widget
 
 
 def _icon(name: str):
@@ -70,7 +71,7 @@ def data_tab():
                             ui.input_select("x_variables_graph", "Select X Variable", choices=[]),
                             col_widths=[6, 6],
                         ),
-                        ui.output_plot("vis_data", height="420px"),
+                        output_widget("vis_data", height="360px", fill=False, fillable=False),
                         full_screen=True,
                     ),
                     class_="data-main-panel",

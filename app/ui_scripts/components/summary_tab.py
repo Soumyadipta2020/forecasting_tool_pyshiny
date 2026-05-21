@@ -35,7 +35,7 @@ def summary_tab():
                 choices=["Boxplot", "Violin Plot", "Histogram"],
                 selected="Violin Plot",
             ),
-            output_widget("summary_stat_vis", height="360px", fill=False, fillable=False),
+            output_widget("summary_stat_vis", height="380px", fill=False, fillable=False),
             class_="summary-visualization-card",
         ),
         ui.card(

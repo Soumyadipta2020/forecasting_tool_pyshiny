@@ -21,7 +21,7 @@ def _icon(name: str):
 app_ui = ui.page_navbar(
     ui.head_content(
         ui.tags.link(rel="stylesheet", href=FONT_AWESOME_CSS),
-        ui.tags.link(rel="stylesheet", href="custom.css?v=ops-20260521i"),
+        ui.tags.link(rel="stylesheet", href="custom.css?v=ops-20260521o"),
     ),
     data_tab(),
     summary_tab(),

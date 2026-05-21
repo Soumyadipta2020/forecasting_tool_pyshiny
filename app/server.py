@@ -4,7 +4,6 @@ Server logic for the Data tab of the PyShiny AI Forecasting Application.
 
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -21,24 +20,6 @@ PLOT_GRID = "#334155"
 PLOT_TEXT = "#e5edf8"
 
 
-def _style_matplotlib_axis(fig, ax):
-    fig.patch.set_facecolor(PLOT_BG)
-    ax.set_facecolor(PLOT_BG)
-    ax.tick_params(colors=PLOT_TEXT)
-    ax.xaxis.label.set_color(PLOT_TEXT)
-    ax.yaxis.label.set_color(PLOT_TEXT)
-    ax.title.set_color("#ffffff")
-    for spine in ax.spines.values():
-        spine.set_color("#475569")
-    ax.grid(True, color=PLOT_GRID, alpha=0.38)
-    legend = ax.get_legend()
-    if legend is not None:
-        legend.get_frame().set_facecolor("#111827")
-        legend.get_frame().set_edgecolor("#475569")
-        for text in legend.get_texts():
-            text.set_color(PLOT_TEXT)
-
-
 def _plotly_dark_layout(fig, title=None):
     fig.update_layout(
         title=title,
@@ -46,10 +27,37 @@ def _plotly_dark_layout(fig, title=None):
         paper_bgcolor=PLOT_BG,
         plot_bgcolor=PLOT_BG,
         font={"color": PLOT_TEXT},
-        margin={"l": 48, "r": 24, "t": 48, "b": 32},
+        hovermode="x unified",
+        legend={
+            "orientation": "h",
+            "x": 0.5,
+            "xanchor": "center",
+            "y": -0.1,
+            "yanchor": "top",
+            "bgcolor": "rgba(31, 43, 61, 0)",
+            "borderwidth": 0,
+        },
+        margin={"l": 48, "r": 24, "t": 48, "b": 48},
     )
     fig.update_xaxes(gridcolor=PLOT_GRID, zerolinecolor="#475569")
     fig.update_yaxes(gridcolor=PLOT_GRID, zerolinecolor="#475569")
+    return fig
+
+
+def _empty_plotly_figure(message):
+    fig = go.Figure()
+    fig.add_annotation(
+        text=message,
+        x=0.5,
+        y=0.5,
+        xref="paper",
+        yref="paper",
+        showarrow=False,
+        font={"size": 15, "color": PLOT_TEXT},
+    )
+    _plotly_dark_layout(fig)
+    fig.update_xaxes(visible=False)
+    fig.update_yaxes(visible=False)
     return fig
 
 
@@ -150,24 +158,16 @@ def server_function(input, output, session):
         )
 
     @output
-    @render.plot
+    @render_widget
     def vis_data():
         df = loaded_data()
         if df is None:
-            fig, ax = plt.subplots(figsize=(10, 4))
-            ax.text(0.5, 0.5, "Load data to see visualization", ha="center", va="center", color=PLOT_TEXT, transform=ax.transAxes)
-            ax.set_axis_off()
-            _style_matplotlib_axis(fig, ax)
-            return fig
+            return _empty_plotly_figure("Load data to see visualization")
 
         x_column = input.x_variables_graph()
         y_column = input.y_variable_graph()
         if not x_column or not y_column or x_column not in df.columns or y_column not in df.columns:
-            fig, ax = plt.subplots(figsize=(10, 4))
-            ax.text(0.5, 0.5, "Select valid X and Y variables", ha="center", va="center", color=PLOT_TEXT, transform=ax.transAxes)
-            ax.set_axis_off()
-            _style_matplotlib_axis(fig, ax)
-            return fig
+            return _empty_plotly_figure("Select valid X and Y variables")
 
         y_values = pd.to_numeric(df[y_column], errors="coerce")
         if x_column == y_column:
@@ -180,14 +180,20 @@ def server_function(input, output, session):
                 x_values = parsed_dates
             x_label = x_column
 
-        fig, ax = plt.subplots(figsize=(11, 4))
-        ax.plot(x_values, y_values, marker="o", linewidth=1.8, color="#026efa", markersize=3)
-        ax.set_title(f"{y_column} over {x_label}", fontsize=12)
-        ax.set_xlabel(x_label)
-        ax.set_ylabel(y_column)
-        _style_matplotlib_axis(fig, ax)
-        fig.autofmt_xdate()
-        plt.tight_layout()
+        fig = go.Figure()
+        fig.add_trace(
+            go.Scatter(
+                x=x_values,
+                y=y_values,
+                mode="lines+markers",
+                name=y_column,
+                line={"color": "#3487ff", "width": 2.2},
+                marker={"color": "#06b6f0", "size": 6},
+            )
+        )
+        _plotly_dark_layout(fig, title=f"{y_column} over {x_label}")
+        fig.update_xaxes(title=x_label)
+        fig.update_yaxes(title=y_column)
         return fig
 
     @output
@@ -888,13 +894,6 @@ def server_function(input, output, session):
     def _generate_forecast_from_forecast_tab():
         forecast_result.set(_build_forecast_result())
 
-    def _blank_forecast_plot(message):
-        fig, ax = plt.subplots(figsize=(11, 4.8))
-        ax.text(0.5, 0.5, message, ha="center", va="center", color=PLOT_TEXT, transform=ax.transAxes)
-        ax.set_axis_off()
-        _style_matplotlib_axis(fig, ax)
-        return fig
-
     @output
     @render.ui
     def forecast_status():
@@ -912,35 +911,67 @@ def server_function(input, output, session):
         )
 
     @output
-    @render.plot
+    @render_widget
     def plot():
         result = forecast_result.get()
         if result is None:
-            return _blank_forecast_plot("Generate a forecast to see actual vs forecast")
+            return _empty_plotly_figure("Generate a forecast to see actual vs forecast")
         if not result.get("ok"):
-            return _blank_forecast_plot(result.get("message", "Forecasting failed"))
+            return _empty_plotly_figure(result.get("message", "Forecasting failed"))
 
-        fig, ax = plt.subplots(figsize=(11.5, 5))
+        fig = go.Figure()
         actual_axis = result["actual_axis"]
-        ax.plot(actual_axis, result["actual"], label="Actual", color="#1f6feb", linewidth=2)
+        fig.add_trace(
+            go.Scatter(
+                x=actual_axis,
+                y=result["actual"],
+                mode="lines",
+                name="Actual",
+                line={"color": "#3487ff", "width": 2.3},
+            )
+        )
 
         fitted = np.asarray(result["fitted"])
         future = np.asarray(result["future"])
         if len(future):
             future_axis = result["future_axis"]
-            ax.plot(future_axis, future, label="Forecast", color="#2da44e", linewidth=2.2, marker="o", markersize=3)
+            fig.add_trace(
+                go.Scatter(
+                    x=future_axis,
+                    y=future,
+                    mode="lines+markers",
+                    name="Forecast",
+                    line={"color": "#12c6a3", "width": 2.4},
+                    marker={"size": 6},
+                )
+            )
             if len(actual_axis):
-                ax.axvline(actual_axis.iloc[-1] if hasattr(actual_axis, "iloc") else actual_axis[-1], color="#6b7280", linestyle="--", alpha=0.55)
+                split_x = actual_axis.iloc[-1] if hasattr(actual_axis, "iloc") else actual_axis[-1]
+                fig.add_shape(
+                    type="line",
+                    x0=split_x,
+                    x1=split_x,
+                    y0=0,
+                    y1=1,
+                    xref="x",
+                    yref="paper",
+                    line={"color": "#94a3b8", "dash": "dash", "width": 1.4},
+                    opacity=0.65,
+                )
         elif len(fitted):
-            ax.plot(actual_axis, fitted, label="Forecast", color="#2da44e", linewidth=1.8, alpha=0.9)
+            fig.add_trace(
+                go.Scatter(
+                    x=actual_axis,
+                    y=fitted,
+                    mode="lines",
+                    name="Forecast",
+                    line={"color": "#12c6a3", "width": 2.1},
+                )
+            )
 
-        ax.set_title(f"Actual vs Forecast: {result['response_column']}", fontsize=13)
-        ax.set_xlabel(result.get("x_label", "Sequence"))
-        ax.set_ylabel(result["response_column"])
-        ax.legend(loc="best")
-        _style_matplotlib_axis(fig, ax)
-        fig.autofmt_xdate()
-        plt.tight_layout()
+        _plotly_dark_layout(fig, title=f"Actual vs Forecast: {result['response_column']}")
+        fig.update_xaxes(title=result.get("x_label", "Sequence"))
+        fig.update_yaxes(title=result["response_column"])
         return fig
 
     @output
@@ -952,23 +983,24 @@ def server_function(input, output, session):
 
         metrics = result["metrics"]
         if result.get("metric_kind") == "classification":
-            cards = [("Accuracy", _format_metric(metrics.get("Accuracy"), "%"), "success")]
+            cards = [("Accuracy", _format_metric(metrics.get("Accuracy"), "%"), "bullseye")]
         else:
             cards = [
-                ("MAPE", _format_metric(metrics.get("MAPE"), "%"), "info"),
-                ("RMSE", _format_metric(metrics.get("RMSE")), "success"),
-                ("MAE", _format_metric(metrics.get("MAE")), "warning"),
-                ("R2", _format_metric(metrics.get("R2")), "danger"),
+                ("MAPE", _format_metric(metrics.get("MAPE"), "%"), "percentage"),
+                ("RMSE", _format_metric(metrics.get("RMSE")), "square-root-variable"),
+                ("MAE", _format_metric(metrics.get("MAE")), "chart-simple"),
+                ("R2", _format_metric(metrics.get("R2")), "superscript"),
             ]
 
         return ui.div(
             *(
                 ui.div(
+                    ui.div(ui.tags.i(class_=f"fa-solid fa-{icon}"), class_="metric-icon"),
                     ui.div(value, class_="metric-value"),
                     ui.div(label, class_="metric-label"),
-                    class_=f"metric-card bg-{color}",
+                    class_="metric-card",
                 )
-                for label, value, color in cards
+                for label, value, icon in cards
             ),
             class_="metric-grid mt-3",
         )

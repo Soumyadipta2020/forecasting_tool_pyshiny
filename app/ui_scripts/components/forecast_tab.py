@@ -1,4 +1,5 @@
 from shiny import ui
+from shinywidgets import output_widget
 
 
 def _icon(name: str):
@@ -85,7 +86,7 @@ def forecast_tab():
                     ui.card(
                         ui.card_header(_icon("chart-line"), " Forecast Results"),
                         ui.output_ui("forecast_status"),
-                        ui.output_plot("plot", height="470px"),
+                        output_widget("plot", height="380px", fill=False, fillable=False),
                         ui.output_ui("model_accuracy"),
                         full_screen=True,
                     ),
