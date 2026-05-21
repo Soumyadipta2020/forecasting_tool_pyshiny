@@ -13,6 +13,7 @@ def forecast_tab():
             ui.layout_columns(
                 ui.card(
                     ui.card_header(_icon("sliders"), " Forecast Controls"),
+                    ui.output_ui("model_recommendation"),
                     ui.input_select(
                         "data_type",
                         "Select Data Type",
@@ -28,9 +29,9 @@ def forecast_tab():
                             "input.seasonal",
                             ui.input_numeric("seasonal_period", "Seasonal Period", value=12, min=1),
                         ),
-                        ui.input_select(
+                        ui.input_selectize(
                             "model",
-                            "Select Time Series Model",
+                            "Select Time Series Model(s)",
                             choices=[
                                 "ARIMA",
                                 "SARIMA",
@@ -44,7 +45,8 @@ def forecast_tab():
                                 "Prophet",
                                 "State Space ARIMA",
                             ],
-                            selected="ARIMA",
+                            selected=["ARIMA"],
+                            multiple=True,
                         ),
                     ),
                     ui.panel_conditional(
@@ -55,9 +57,9 @@ def forecast_tab():
                             choices=[],
                             multiple=True,
                         ),
-                        ui.input_select(
+                        ui.input_selectize(
                             "model1",
-                            "Select Model for Non-Time Series",
+                            "Select Model(s) for Non-Time Series",
                             choices=[
                                 "Linear Regression",
                                 "GLM",
@@ -65,8 +67,20 @@ def forecast_tab():
                                 "LASSO",
                                 "Ridge Regression",
                             ],
-                            selected="Linear Regression",
+                            selected=["Linear Regression"],
+                            multiple=True,
                         ),
+                        ui.input_checkbox("use_backtesting", "Enable Train/Test Split", value=False),
+                        ui.panel_conditional(
+                            "input.use_backtesting",
+                            ui.input_slider("train_split", "Training Set %", min=50, max=95, value=80, step=5),
+                        ),
+                    ),
+                    ui.input_select(
+                        "best_model_metric",
+                        "Best Model Metric",
+                        choices=["MAPE", "RMSE", "MAE", "R2", "BIC", "Accuracy"],
+                        selected="MAPE",
                     ),
                     ui.input_action_button(
                         "forecast",
@@ -76,9 +90,15 @@ def forecast_tab():
                     ),
                     ui.download_button(
                         "download",
-                        "Download",
+                        "Download Data",
                         icon=_icon("download"),
                         class_="btn-info w-100 mt-2",
+                    ),
+                    ui.download_button(
+                        "download_report",
+                        "Download Full Report",
+                        icon=_icon("file-pdf"),
+                        class_="btn-secondary w-100 mt-2",
                     ),
                     class_="forecast-control-card",
                 ),
@@ -93,6 +113,19 @@ def forecast_tab():
                     ui.card(
                         ui.card_header(_icon("microchip"), " Model Summary"),
                         ui.output_text_verbatim("fitted_model"),
+                        full_screen=True,
+                    ),
+                    ui.panel_conditional(
+                        "input.data_type === 'Non-Time Series'",
+                        ui.card(
+                            ui.card_header(_icon("lightbulb"), " Explainability (Feature Importance)"),
+                            output_widget("explainability_plot", height="300px", fill=False, fillable=False),
+                            full_screen=True,
+                        ),
+                    ),
+                    ui.card(
+                        ui.card_header(_icon("table"), " Forecast Table"),
+                        ui.output_data_frame("forecast_table"),
                         full_screen=True,
                     ),
                     class_="forecast-main-panel",

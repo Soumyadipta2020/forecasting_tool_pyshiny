@@ -494,23 +494,32 @@ def server_function(input, output, session):
     def _as_error(message):
         return {"ok": False, "message": message}
 
-    def _regression_metrics(actual, predicted):
+    def _regression_metrics(actual, predicted, k=2):
         actual = np.asarray(actual, dtype=float)
         predicted = np.asarray(predicted, dtype=float)
         mask = np.isfinite(actual) & np.isfinite(predicted)
         if not mask.any():
-            return {"MAE": np.nan, "RMSE": np.nan, "MAPE": np.nan, "R2": np.nan}
+            return {"MAE": np.nan, "RMSE": np.nan, "MAPE": np.nan, "R2": np.nan, "BIC": np.nan}
 
         actual = actual[mask]
         predicted = predicted[mask]
         errors = actual - predicted
         mae = float(np.mean(np.abs(errors)))
-        rmse = float(np.sqrt(np.mean(errors**2)))
+        ssr = float(np.sum(errors**2))
+        n = len(actual)
+        rmse = float(np.sqrt(ssr / n))
         nonzero = actual != 0
         mape = float(np.mean(np.abs(errors[nonzero] / actual[nonzero])) * 100) if nonzero.any() else np.nan
         total = float(np.sum((actual - np.mean(actual)) ** 2))
-        r2 = float(1 - np.sum(errors**2) / total) if total else np.nan
-        return {"MAE": mae, "RMSE": rmse, "MAPE": mape, "R2": r2}
+        r2 = float(1 - ssr / total) if total else np.nan
+        
+        # Calculate pseudo-BIC
+        if ssr > 0 and n > 0:
+            bic = float(n * np.log(ssr / n) + k * np.log(n))
+        else:
+            bic = np.nan
+            
+        return {"MAE": mae, "RMSE": rmse, "MAPE": mape, "R2": r2, "BIC": bic}
 
     def _classification_metrics(actual, predicted):
         actual = np.asarray(actual)
@@ -606,11 +615,18 @@ def server_function(input, output, session):
                 notes.append(f"{model_name} is approximated with an ARIMA mean model in this PyShiny build.")
 
         fitted = np.asarray(fit.fittedvalues, dtype=float)
-        future = np.asarray(fit.forecast(steps=horizon), dtype=float)
+        forecast_obj = fit.get_forecast(steps=horizon)
+        future = np.asarray(forecast_obj.predicted_mean, dtype=float)
+        try:
+            conf = forecast_obj.conf_int(alpha=0.05)
+            lower = np.asarray(conf.iloc[:, 0] if hasattr(conf, 'iloc') else conf[:, 0], dtype=float)
+            upper = np.asarray(conf.iloc[:, 1] if hasattr(conf, 'iloc') else conf[:, 1], dtype=float)
+        except Exception:
+            lower = upper = None
         summary = str(fit.summary())
         if notes:
             summary = "\n".join(notes) + "\n\n" + summary
-        return fitted, future, summary
+        return fitted, future, summary, lower, upper
 
     def _fit_ets(values, horizon):
         from statsmodels.tsa.holtwinters import ExponentialSmoothing
@@ -625,7 +641,7 @@ def server_function(input, output, session):
             seasonal_periods=seasonal_period if seasonal else None,
             initialization_method="estimated",
         ).fit(optimized=True)
-        return np.asarray(fit.fittedvalues, dtype=float), np.asarray(fit.forecast(horizon), dtype=float), str(fit.summary())
+        return np.asarray(fit.fittedvalues, dtype=float), np.asarray(fit.forecast(horizon), dtype=float), str(fit.summary()), None, None
 
     def _lagged_matrix(values, lags):
         y = np.asarray(values, dtype=float)
@@ -677,7 +693,7 @@ def server_function(input, output, session):
             f"Lag features: {lags}",
             f"Estimator: {estimator}",
         ]
-        return fitted, np.asarray(future, dtype=float), "\n".join(summary)
+        return fitted, np.asarray(future, dtype=float), "\n".join(summary), None, None
 
     def _fit_prophet(values, horizon):
         from prophet import Prophet
@@ -692,18 +708,24 @@ def server_function(input, output, session):
         model = Prophet()
         model.fit(model_df)
         future_frame = model.make_future_dataframe(periods=horizon, freq="D")
-        predicted = model.predict(future_frame)["yhat"].to_numpy()
+        future = predicted["yhat"].to_numpy()
+        lower = predicted["yhat_lower"].to_numpy()
+        upper = predicted["yhat_upper"].to_numpy()
         summary = [
             "Model: Prophet",
             f"Changepoints: {len(model.changepoints)}",
             f"Seasonality mode: {model.seasonality_mode}",
             f"Growth: {model.growth}",
         ]
-        return predicted[: len(y)], predicted[len(y):], "\n".join(summary)
+        return future[: len(y)], future[len(y):], "\n".join(summary), lower[len(y):], upper[len(y):]
 
     def _run_time_series_forecast(df, response_column):
         horizon = _valid_horizon()
-        model_name = input.model() or "ARIMA"
+        model_names = input.model()
+        if not model_names:
+            model_names = ["ARIMA"]
+        elif isinstance(model_names, str):
+            model_names = [model_names]
 
         series = pd.to_numeric(df[response_column], errors="coerce")
         model_df = df.loc[series.notna()].copy().reset_index(drop=True)
@@ -713,42 +735,72 @@ def server_function(input, output, session):
 
         seasonal_period = int(input.seasonal_period() or 1) if input.seasonal() else 1
 
-        try:
-            if model_name == "ETS":
-                fitted, future, summary = _fit_ets(y, horizon)
-            elif model_name == "Prophet":
-                fitted, future, summary = _fit_prophet(y, horizon)
-            elif model_name in {"GRNN", "Neural Network", "AutoML"}:
-                fitted, future, summary = _fit_lagged_regressor(y, horizon, model_name)
-            else:
-                fitted, future, summary = _fit_arima_family(y, horizon, model_name, seasonal_period)
-        except Exception as exc:
-            return _as_error(f"Could not fit {model_name}: {exc}")
-
         actual_axis, future_axis, x_label = _future_axis_from_time(model_df, horizon)
-        metrics = _regression_metrics(y, fitted)
+        
+        models_dict = {}
+        for model_name in model_names:
+            try:
+                if model_name == "ETS":
+                    fitted, future, summary, lower, upper = _fit_ets(y, horizon)
+                elif model_name == "Prophet":
+                    fitted, future, summary, lower, upper = _fit_prophet(y, horizon)
+                elif model_name in {"GRNN", "Neural Network", "AutoML"}:
+                    fitted, future, summary, lower, upper = _fit_lagged_regressor(y, horizon, model_name)
+                else:
+                    fitted, future, summary, lower, upper = _fit_arima_family(y, horizon, model_name, seasonal_period)
+            except Exception as exc:
+                continue
+
+            metrics = _regression_metrics(y, fitted)
+            models_dict[model_name] = {
+                "fitted": fitted,
+                "future": future,
+                "summary": summary,
+                "metrics": metrics,
+                "lower": lower,
+                "upper": upper,
+            }
+
+        if not models_dict:
+            return _as_error("Could not fit any of the selected models.")
+
+        best_metric = input.best_model_metric()
+        best_model = None
+        best_score = np.inf if best_metric != "R2" else -np.inf
+        for m_name, m_data in models_dict.items():
+            score = m_data["metrics"].get(best_metric, np.nan)
+            if not np.isnan(score):
+                if best_metric != "R2" and score < best_score:
+                    best_score = score
+                    best_model = m_name
+                elif best_metric == "R2" and score > best_score:
+                    best_score = score
+                    best_model = m_name
+        
+        if not best_model:
+            best_model = list(models_dict.keys())[0]
+
         result_table = pd.DataFrame(
             {
                 "Axis": list(actual_axis) + list(future_axis),
                 "Actual": list(y) + [np.nan] * horizon,
-                "Fitted": list(fitted) + [np.nan] * horizon,
-                "Forecast": [np.nan] * len(y) + list(future),
             }
         )
+        for m_name, m_data in models_dict.items():
+            result_table[f"{m_name}_Fitted"] = list(m_data["fitted"]) + [np.nan] * horizon
+            result_table[f"{m_name}_Forecast"] = [np.nan] * len(y) + list(m_data["future"])
 
         return {
             "ok": True,
             "kind": "Time Series",
-            "model_name": model_name,
+            "model_name": ", ".join(models_dict.keys()),
+            "best_model": best_model,
+            "models": models_dict,
             "response_column": response_column,
             "x_label": x_label,
             "actual_axis": actual_axis,
             "future_axis": future_axis,
             "actual": y,
-            "fitted": fitted,
-            "future": future,
-            "metrics": metrics,
-            "summary": summary,
             "table": result_table,
         }
 
@@ -779,18 +831,22 @@ def server_function(input, output, session):
         from sklearn.linear_model import Lasso, LinearRegression, LogisticRegression, Ridge
         from sklearn.pipeline import make_pipeline
         from sklearn.preprocessing import StandardScaler
+        from sklearn.model_selection import train_test_split
         import statsmodels.api as sm
 
-        model_name = input.model1() or "Linear Regression"
+        model_names = input.model1()
+        if not model_names:
+            model_names = ["Linear Regression"]
+        elif isinstance(model_names, str):
+            model_names = [model_names]
+            
         feature_columns = _feature_columns(df, response_column)
         if not feature_columns:
             return _as_error("Select at least one predictor variable for non-time-series forecasting.")
 
         y_raw = df[response_column]
         y_numeric = pd.to_numeric(y_raw, errors="coerce")
-        keep_rows = y_raw.notna()
-        if model_name != "Logistic Regression":
-            keep_rows = keep_rows & y_numeric.notna()
+        keep_rows = y_raw.notna() & y_numeric.notna() if "Logistic Regression" not in model_names else y_raw.notna()
 
         model_df = df.loc[keep_rows].reset_index(drop=True)
         if model_df.empty:
@@ -801,66 +857,128 @@ def server_function(input, output, session):
             return _as_error("The selected predictor variables could not be prepared for modeling.")
         x_frame = x_frame.astype(float)
 
-        if model_name == "Logistic Regression" and y_raw.loc[keep_rows].nunique(dropna=True) <= 20:
-            y = y_raw.loc[keep_rows].reset_index(drop=True)
-            model = make_pipeline(StandardScaler(), LogisticRegression(max_iter=1000))
-            model.fit(x_frame, y)
-            fitted = model.predict(x_frame)
-            metrics = _classification_metrics(y, fitted)
-            summary = _sklearn_regression_summary(model_name, model, x_frame.columns.tolist())
-            metric_kind = "classification"
+        use_backtesting = input.use_backtesting()
+        train_pct = input.train_split() / 100.0 if use_backtesting else 1.0
+
+        if use_backtesting and len(model_df) > 5:
+            indices = np.arange(len(model_df))
+            idx_train, idx_test = train_test_split(indices, train_size=train_pct, random_state=42)
+            idx_train = np.sort(idx_train)
+            idx_test = np.sort(idx_test)
         else:
-            y = y_numeric.loc[keep_rows].astype(float).reset_index(drop=True)
-            metric_kind = "regression"
-            if model_name == "GLM":
-                x_with_constant = sm.add_constant(x_frame, has_constant="add")
-                model = sm.GLM(y, x_with_constant, family=sm.families.Gaussian()).fit()
-                fitted = model.predict(x_with_constant)
-                summary = str(model.summary())
-            elif model_name == "LASSO":
-                model = make_pipeline(StandardScaler(), Lasso(alpha=0.01, max_iter=10000))
-                model.fit(x_frame, y)
-                fitted = model.predict(x_frame)
-                summary = _sklearn_regression_summary(model_name, model, x_frame.columns.tolist())
-            elif model_name == "Ridge Regression":
-                model = make_pipeline(StandardScaler(), Ridge(alpha=1.0))
-                model.fit(x_frame, y)
-                fitted = model.predict(x_frame)
-                summary = _sklearn_regression_summary(model_name, model, x_frame.columns.tolist())
-            else:
-                model = LinearRegression()
-                model.fit(x_frame, y)
-                fitted = model.predict(x_frame)
-                if model_name == "Logistic Regression":
-                    summary_note = "Logistic Regression requires a categorical response; Linear Regression was used instead.\n\n"
+            idx_train = np.arange(len(model_df))
+            idx_test = idx_train
+
+        x_train = x_frame.iloc[idx_train]
+        x_test = x_frame.iloc[idx_test]
+
+        models_dict = {}
+        metric_kind = "regression"
+        for model_name in model_names:
+            try:
+                if model_name == "Logistic Regression" and y_raw.loc[keep_rows].nunique(dropna=True) <= 20:
+                    y = y_raw.loc[keep_rows].reset_index(drop=True)
+                    y_tr, y_te = y.iloc[idx_train], y.iloc[idx_test]
+                    model = make_pipeline(StandardScaler(), LogisticRegression(max_iter=1000))
+                    model.fit(x_train, y_tr)
+                    fitted_full = model.predict(x_frame)
+                    metrics = _classification_metrics(y_te, model.predict(x_test))
+                    summary = _sklearn_regression_summary(model_name, model, x_frame.columns.tolist())
+                    metric_kind = "classification"
+                    
+                    estimator = model.steps[-1][1]
+                    coef = estimator.coef_[0] if len(estimator.coef_) == 1 else estimator.coef_[0]
+                    importance = {"features": x_frame.columns.tolist(), "importance": coef.tolist()}
                 else:
-                    summary_note = ""
-                summary = summary_note + _sklearn_regression_summary("Linear Regression", model, x_frame.columns.tolist())
-            metrics = _regression_metrics(y, fitted)
+                    if model_name == "Logistic Regression":
+                        continue
+                    y = y_numeric.loc[keep_rows].astype(float).reset_index(drop=True)
+                    y_tr, y_te = y.iloc[idx_train], y.iloc[idx_test]
+                    metric_kind = "regression"
+                    importance = None
+                    if model_name == "GLM":
+                        x_tr_const = sm.add_constant(x_train, has_constant="add")
+                        x_full_const = sm.add_constant(x_frame, has_constant="add")
+                        model = sm.GLM(y_tr, x_tr_const, family=sm.families.Gaussian()).fit()
+                        fitted_full = model.predict(x_full_const)
+                        metrics = _regression_metrics(y_te, model.predict(sm.add_constant(x_test, has_constant="add")))
+                        summary = str(model.summary())
+                        if 'const' in model.params:
+                            importance = {"features": list(x_frame.columns), "importance": model.params.drop('const').tolist()}
+                        else:
+                            importance = {"features": list(x_frame.columns), "importance": model.params.tolist()}
+                    elif model_name == "LASSO":
+                        model = make_pipeline(StandardScaler(), Lasso(alpha=0.01, max_iter=10000))
+                        model.fit(x_train, y_tr)
+                        fitted_full = model.predict(x_frame)
+                        metrics = _regression_metrics(y_te, model.predict(x_test))
+                        summary = _sklearn_regression_summary(model_name, model, x_frame.columns.tolist())
+                        importance = {"features": x_frame.columns.tolist(), "importance": model.steps[-1][1].coef_.tolist()}
+                    elif model_name == "Ridge Regression":
+                        model = make_pipeline(StandardScaler(), Ridge(alpha=1.0))
+                        model.fit(x_train, y_tr)
+                        fitted_full = model.predict(x_frame)
+                        metrics = _regression_metrics(y_te, model.predict(x_test))
+                        summary = _sklearn_regression_summary(model_name, model, x_frame.columns.tolist())
+                        importance = {"features": x_frame.columns.tolist(), "importance": model.steps[-1][1].coef_.tolist()}
+                    else:
+                        model = LinearRegression()
+                        model.fit(x_train, y_tr)
+                        fitted_full = model.predict(x_frame)
+                        metrics = _regression_metrics(y_te, model.predict(x_test))
+                        summary = _sklearn_regression_summary("Linear Regression", model, x_frame.columns.tolist())
+                        importance = {"features": x_frame.columns.tolist(), "importance": model.coef_.tolist()}
+            except Exception:
+                continue
+
+            models_dict[model_name] = {
+                "fitted": fitted_full,
+                "summary": summary,
+                "metrics": metrics,
+                "importance": importance,
+            }
+
+        if not models_dict:
+            return _as_error("Could not fit any of the selected models.")
+
+        best_metric = input.best_model_metric()
+        if metric_kind == "classification":
+            best_metric = "Accuracy"
+        
+        best_model = None
+        best_score = np.inf if best_metric != "R2" and best_metric != "Accuracy" else -np.inf
+        for m_name, m_data in models_dict.items():
+            score = m_data["metrics"].get(best_metric, np.nan)
+            if not np.isnan(score):
+                if best_metric not in ("R2", "Accuracy") and score < best_score:
+                    best_score = score
+                    best_model = m_name
+                elif best_metric in ("R2", "Accuracy") and score > best_score:
+                    best_score = score
+                    best_model = m_name
+        if not best_model:
+            best_model = list(models_dict.keys())[0]
 
         axis = np.arange(1, len(model_df) + 1)
-        result_table = pd.DataFrame(
-            {
-                "Sequence": axis,
-                "Actual": list(y),
-                "Forecast": list(fitted),
-            }
-        )
+        result_table = pd.DataFrame({
+            "Sequence": axis,
+            "Actual": list(y_raw.loc[keep_rows]) if metric_kind == "classification" else list(y_numeric.loc[keep_rows]),
+        })
+        for m_name, m_data in models_dict.items():
+            result_table[f"{m_name}_Forecast"] = list(m_data["fitted"])
 
         return {
             "ok": True,
             "kind": "Non-Time Series",
-            "model_name": model_name,
+            "model_name": ", ".join(models_dict.keys()),
+            "best_model": best_model,
+            "models": models_dict,
             "response_column": response_column,
             "x_label": "Sequence",
             "actual_axis": axis,
             "future_axis": [],
-            "actual": np.asarray(y),
-            "fitted": np.asarray(fitted),
-            "future": np.asarray([]),
-            "metrics": metrics,
+            "actual": np.asarray(y_raw.loc[keep_rows] if metric_kind == "classification" else y_numeric.loc[keep_rows]),
             "metric_kind": metric_kind,
-            "summary": summary,
             "table": result_table,
         }
 
@@ -883,6 +1001,38 @@ def server_function(input, output, session):
     @reactive.event(input.implement_forecasting, ignore_init=True)
     def _implement_forecasting_from_summary():
         ui.update_navset("main_nav", selected="forecasting", session=session)
+
+    @output
+    @render.ui
+    def model_recommendation():
+        df = loaded_data()
+        if df is None or df.empty:
+            return ui.div()
+        
+        data_type = input.data_type()
+        if data_type == "Time Series":
+            response = _preferred_response_column(df)
+            if not response:
+                return ui.div()
+            y = pd.to_numeric(df[response], errors="coerce").dropna()
+            if len(y) > 30:
+                if input.seasonal():
+                    suggested = "SARIMA or Prophet"
+                else:
+                    suggested = "ARIMA or Prophet"
+            else:
+                suggested = "ETS or simple ARIMA"
+            return ui.div(ui.tags.i(class_="fa-solid fa-lightbulb"), f" Recommended: {suggested} (based on history size and seasonality).", class_="alert alert-info py-2 m-2")
+        else:
+            response = _preferred_response_column(df)
+            if not response:
+                return ui.div()
+            feature_cols = _feature_columns(df, response)
+            if len(feature_cols) > 20 and len(df) < 100:
+                suggested = "LASSO or Ridge"
+            else:
+                suggested = "Linear Regression or AutoML (Random Forest)"
+            return ui.div(ui.tags.i(class_="fa-solid fa-lightbulb"), f" Recommended: {suggested} (based on features vs observations).", class_="alert alert-info py-2 m-2")
 
     @reactive.effect
     @reactive.event(input.forecast, ignore_init=True)
@@ -926,42 +1076,67 @@ def server_function(input, output, session):
             )
         )
 
-        fitted = np.asarray(result["fitted"])
-        future = np.asarray(result["future"])
-        if len(future):
-            future_axis = result["future_axis"]
-            fig.add_trace(
-                go.Scatter(
-                    x=future_axis,
-                    y=future,
-                    mode="lines+markers",
-                    name="Forecast",
-                    line={"color": "#12c6a3", "width": 2.4},
-                    marker={"size": 6},
+        models_dict = result.get("models", {})
+        colors = ["rgb(18, 198, 163)", "rgb(245, 158, 11)", "rgb(236, 72, 153)", "rgb(139, 92, 246)", "rgb(239, 68, 68)", "rgb(59, 130, 246)"]
+        color_idx = 0
+        
+        for m_name, m_data in models_dict.items():
+            color = colors[color_idx % len(colors)]
+            color_idx += 1
+            
+            fitted = np.asarray(m_data.get("fitted", []))
+            future = np.asarray(m_data.get("future", []))
+            lower = m_data.get("lower")
+            upper = m_data.get("upper")
+            
+            if len(future):
+                future_axis = result["future_axis"]
+                fig.add_trace(
+                    go.Scatter(
+                        x=future_axis,
+                        y=future,
+                        mode="lines+markers",
+                        name=f"{m_name} Forecast",
+                        line={"color": color, "width": 2.4},
+                        marker={"size": 6},
+                    )
                 )
-            )
-            if len(actual_axis):
-                split_x = actual_axis.iloc[-1] if hasattr(actual_axis, "iloc") else actual_axis[-1]
-                fig.add_shape(
-                    type="line",
-                    x0=split_x,
-                    x1=split_x,
-                    y0=0,
-                    y1=1,
-                    xref="x",
-                    yref="paper",
-                    line={"color": "#94a3b8", "dash": "dash", "width": 1.4},
-                    opacity=0.65,
+                if lower is not None and upper is not None:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=np.concatenate([future_axis, future_axis[::-1]]),
+                            y=np.concatenate([upper, lower[::-1]]),
+                            fill="toself",
+                            fillcolor=color.replace("rgb", "rgba").replace(")", ", 0.35)"),
+                            opacity=0.35,
+                            line={"color": "rgba(255,255,255,0)"},
+                            name=f"{m_name} 95% CI",
+                            showlegend=True,
+                        )
+                    )
+            elif len(fitted):
+                fig.add_trace(
+                    go.Scatter(
+                        x=actual_axis,
+                        y=fitted,
+                        mode="lines",
+                        name=f"{m_name} Fitted",
+                        line={"color": color, "width": 2.1},
+                    )
                 )
-        elif len(fitted):
-            fig.add_trace(
-                go.Scatter(
-                    x=actual_axis,
-                    y=fitted,
-                    mode="lines",
-                    name="Forecast",
-                    line={"color": "#12c6a3", "width": 2.1},
-                )
+
+        if len(result.get("future_axis", [])) and len(actual_axis):
+            split_x = actual_axis.iloc[-1] if hasattr(actual_axis, "iloc") else actual_axis[-1]
+            fig.add_shape(
+                type="line",
+                x0=split_x,
+                x1=split_x,
+                y0=0,
+                y1=1,
+                xref="x",
+                yref="paper",
+                line={"color": "#94a3b8", "dash": "dash", "width": 1.4},
+                opacity=0.65,
             )
 
         _plotly_dark_layout(fig, title=f"Actual vs Forecast: {result['response_column']}")
@@ -975,29 +1150,66 @@ def server_function(input, output, session):
         result = forecast_result.get()
         if result is None or not result.get("ok"):
             return ui.div()
+            
+        models_dict = result.get("models", {})
+        best_model = result.get("best_model", "")
+        best_metric = input.best_model_metric()
+        
+        metric_keys = ["MAPE", "RMSE", "MAE", "R2", "BIC"] if result.get("metric_kind") != "classification" else ["Accuracy"]
+        
+        table_html = "<div class='table-responsive mt-2 mb-4'><table class='table table-hover table-borderless align-middle' style='border: 1px solid var(--ops-border); border-radius: 8px; overflow: hidden; background: var(--ops-panel-deep);'><thead style='background: rgba(255,255,255,0.03);'><tr><th style='padding: 12px 16px;'>Model</th>"
+        for k in metric_keys:
+            table_html += f"<th style='padding: 12px 16px; color: #9db2ce; font-size: 0.8rem; font-weight: 800;'>{k}</th>"
+        table_html += "</tr></thead><tbody>"
+        
+        for m_name, m_data in models_dict.items():
+            is_best = (m_name == best_model)
+            row_style = "background: rgba(245, 158, 11, 0.1);" if is_best else ""
+            badge = " <span class='badge' style='background: var(--ops-amber); color: #000; margin-left: 8px;'>Best</span>" if is_best else ""
+            table_html += f"<tr style='{row_style}'><td style='padding: 12px 16px; font-weight: 700;'>{m_name}{badge}</td>"
+            for k in metric_keys:
+                val = m_data["metrics"].get(k, np.nan)
+                text_color = "color: #fff;" if is_best else "color: #dbeafe;"
+                table_html += f"<td style='padding: 12px 16px; {text_color}'>{_format_metric(val, '%' if k in ['MAPE', 'Accuracy'] else '')}</td>"
+            table_html += "</tr>"
+        table_html += "</tbody></table></div>"
 
-        metrics = result["metrics"]
+        if best_model and best_model in models_dict:
+            metrics = models_dict[best_model]["metrics"]
+        else:
+            metrics = result.get("metrics", {})
+            
         if result.get("metric_kind") == "classification":
-            cards = [("Accuracy", _format_metric(metrics.get("Accuracy"), "%"), "bullseye")]
+            cards = [("Accuracy", _format_metric(metrics.get("Accuracy"), "%"), "bullseye", "primary")]
         else:
             cards = [
-                ("MAPE", _format_metric(metrics.get("MAPE"), "%"), "percentage"),
-                ("RMSE", _format_metric(metrics.get("RMSE")), "square-root-variable"),
-                ("MAE", _format_metric(metrics.get("MAE")), "chart-simple"),
-                ("R2", _format_metric(metrics.get("R2")), "superscript"),
+                ("MAPE", _format_metric(metrics.get("MAPE"), "%"), "percentage", "primary"),
+                ("RMSE", _format_metric(metrics.get("RMSE")), "square-root-variable", "success"),
+                ("MAE", _format_metric(metrics.get("MAE")), "chart-simple", "warning"),
+                ("R2", _format_metric(metrics.get("R2")), "superscript", "purple"),
+                ("BIC", _format_metric(metrics.get("BIC")), "chart-line", "danger"),
             ]
 
         return ui.div(
-            *(
-                ui.div(
-                    ui.div(ui.tags.i(class_=f"fa-solid fa-{icon}"), class_="metric-icon"),
-                    ui.div(value, class_="metric-value"),
-                    ui.div(label, class_="metric-label"),
-                    class_="metric-card",
-                )
-                for label, value, icon in cards
+            ui.div("Model Comparison", style="color: #9db2ce; font-size: 0.85rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.5rem;"),
+            ui.HTML(table_html),
+            ui.div(
+                ui.span("Best Model Metrics", style="color: #9db2ce; font-size: 0.85rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 12px;"),
+                ui.span(best_model, class_="badge", style="background: var(--ops-accent); color: #fff; font-size: 0.85rem; padding: 0.4rem 0.6rem;"),
+                class_="d-flex align-items-center mb-2 mt-4"
             ),
-            class_="metric-grid mt-3",
+            ui.div(
+                *(
+                    ui.div(
+                        ui.div(ui.tags.i(class_=f"fa-solid fa-{icon}"), class_="metric-icon"),
+                        ui.div(value, class_="metric-value"),
+                        ui.div(label, class_="metric-label"),
+                        class_=f"metric-card border-{color}",
+                    )
+                    for label, value, icon, color in cards
+                ),
+                class_="metric-grid mt-2",
+            )
         )
 
     @output
@@ -1008,7 +1220,56 @@ def server_function(input, output, session):
             return "Generate a forecast to see fitted model parameters."
         if not result.get("ok"):
             return result.get("message", "Forecasting failed.")
-        return result.get("summary", "No fitted model summary is available.")
+        
+        models_dict = result.get("models", {})
+        if not models_dict:
+            return result.get("summary", "No fitted model summary is available.")
+        
+        summaries = []
+        for m_name, m_data in models_dict.items():
+            summaries.append(f"--- {m_name} ---\n{m_data.get('summary', '')}")
+        return "\n\n".join(summaries)
+
+    @output
+    @render.data_frame
+    def forecast_table():
+        result = forecast_result.get()
+        if result is None or not result.get("ok"):
+            return pd.DataFrame()
+        return render.DataGrid(result["table"], width="100%", height="400px", filters=True)
+
+    @output
+    @render_widget
+    def explainability_plot():
+        result = forecast_result.get()
+        if result is None or not result.get("ok"):
+            return _empty_plotly_figure("Generate a non-time-series forecast to see explainability")
+            
+        models_dict = result.get("models", {})
+        best_model = result.get("best_model", "")
+        
+        importance_data = None
+        if best_model in models_dict:
+            importance_data = models_dict[best_model].get("importance")
+            
+        if not importance_data:
+            return _empty_plotly_figure(f"No explainability available for {best_model}")
+            
+        features = importance_data["features"]
+        importances = importance_data["importance"]
+        
+        df_imp = pd.DataFrame({"Feature": features, "Importance": importances})
+        df_imp["Abs_Importance"] = df_imp["Importance"].abs()
+        df_imp = df_imp.sort_values(by="Abs_Importance", ascending=True).tail(15)
+        
+        fig = go.Figure(go.Bar(
+            x=df_imp["Importance"],
+            y=df_imp["Feature"],
+            orientation="h",
+            marker_color="#12c6a3",
+        ))
+        _plotly_dark_layout(fig, title=f"Feature Importance ({best_model})")
+        return fig
 
     @output
     @render.download(filename="forecast_results.csv")
@@ -1018,3 +1279,34 @@ def server_function(input, output, session):
             yield pd.DataFrame({"Message": ["Generate a forecast before downloading results."]}).to_csv(index=False)
             return
         yield result["table"].to_csv(index=False)
+
+    @output
+    @render.download(filename="forecast_report.html")
+    def download_report():
+        result = forecast_result.get()
+        if result is None or not result.get("ok"):
+            yield "<html><body><h1>Generate a forecast before downloading report.</h1></body></html>"
+            return
+            
+        html = f"<html><head><title>Forecast Report</title></head><body style='font-family:sans-serif; padding: 20px;'>"
+        html += f"<h1>Forecast Report: {result['response_column']}</h1>"
+        html += f"<h2>Best Model: {result['best_model']}</h2>"
+        html += "<h3>Metrics</h3>"
+        
+        models_dict = result.get("models", {})
+        metric_keys = ["MAPE", "RMSE", "MAE", "R2", "BIC"] if result.get("metric_kind") != "classification" else ["Accuracy"]
+        html += "<table border='1' cellpadding='5' style='border-collapse: collapse;'>"
+        html += "<tr><th>Model</th>" + "".join([f"<th>{k}</th>" for k in metric_keys]) + "</tr>"
+        for m_name, m_data in models_dict.items():
+            html += f"<tr><td>{m_name}</td>"
+            for k in metric_keys:
+                val = m_data["metrics"].get(k, np.nan)
+                html += f"<td>{_format_metric(val)}</td>"
+            html += "</tr>"
+        html += "</table>"
+        
+        html += "<h3>Forecast Table Preview</h3>"
+        html += result["table"].head(50).to_html(index=False)
+        html += "</body></html>"
+        
+        yield html
