@@ -65,6 +65,11 @@ def data_tab():
                 ui.div(
                     ui.output_ui("info_data"),
                     ui.card(
+                        ui.card_header(_icon("clipboard-check"), " Data Quality Report"),
+                        ui.output_ui("data_quality_report"),
+                        full_screen=True,
+                    ),
+                    ui.card(
                         ui.card_header(_icon("chart-line"), " Quick Visualization"),
                         ui.layout_columns(
                             ui.input_select("y_variable_graph", "Select Y Variable", choices=[]),

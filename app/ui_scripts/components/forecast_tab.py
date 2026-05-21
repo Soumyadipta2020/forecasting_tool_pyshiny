@@ -21,13 +21,28 @@ def forecast_tab():
                         selected="Time Series",
                     ),
                     ui.input_select("response_variable", "Select Response Variable", choices=[]),
+                    ui.input_checkbox("preprocess_interpolate", "Impute Missing Data (Interpolate)", value=False),
+                    ui.input_checkbox("preprocess_outliers", "Cap Outliers (IQR)", value=False),
                     ui.input_numeric("horizon", "Forecast Horizon", value=12, min=1),
                     ui.panel_conditional(
                         "input.data_type === 'Time Series'",
+                        ui.input_numeric("scenario_adj", "Future Adjustment (%)", value=0, step=1),
                         ui.input_checkbox("seasonal", "Is Data Seasonal?", value=False),
                         ui.panel_conditional(
                             "input.seasonal",
                             ui.input_numeric("seasonal_period", "Seasonal Period", value=12, min=1),
+                        ),
+                        ui.input_select(
+                            "ts_validation",
+                            "Validation Method",
+                            choices=["Standard (Train/Test)", "Rolling Cross-Validation"],
+                            selected="Standard (Train/Test)",
+                        ),
+                        ui.input_numeric("ts_test_periods", "Test Periods", value=12, min=1),
+                        ui.panel_conditional(
+                            "input.ts_validation === 'Rolling Cross-Validation'",
+                            ui.input_numeric("rolling_folds", "Rolling Folds", value=4, min=2),
+                            ui.input_slider("rolling_initial_pct", "Initial Training %", min=40, max=85, value=60, step=5),
                         ),
                         ui.input_selectize(
                             "model",
@@ -44,6 +59,7 @@ def forecast_tab():
                                 "ETS",
                                 "Prophet",
                                 "State Space ARIMA",
+                                "Ensemble",
                             ],
                             selected=["ARIMA"],
                             multiple=True,
@@ -73,7 +89,20 @@ def forecast_tab():
                         ui.input_checkbox("use_backtesting", "Enable Train/Test Split", value=False),
                         ui.panel_conditional(
                             "input.use_backtesting",
+                            ui.input_select(
+                                "tabular_split_mode",
+                                "Split Method",
+                                choices=["Random Split", "Last N Rows"],
+                                selected="Random Split",
+                            ),
                             ui.input_slider("train_split", "Training Set %", min=50, max=95, value=80, step=5),
+                            ui.input_numeric("tabular_test_rows", "Test Rows for Last-N", value=20, min=1),
+                        ),
+                        ui.input_checkbox("use_scenario", "Enable Scenario Row", value=False),
+                        ui.panel_conditional(
+                            "input.use_scenario",
+                            ui.input_select("scenario_feature", "Scenario Feature", choices=[]),
+                            ui.input_text("scenario_value", "Scenario Value", value=""),
                         ),
                     ),
                     ui.input_select(
@@ -97,7 +126,7 @@ def forecast_tab():
                     ui.download_button(
                         "download_report",
                         "Download Full Report",
-                        icon=_icon("file-pdf"),
+                        icon=_icon("file-lines"),
                         class_="btn-secondary w-100 mt-2",
                     ),
                     class_="forecast-control-card",
@@ -106,6 +135,7 @@ def forecast_tab():
                     ui.card(
                         ui.card_header(_icon("chart-line"), " Forecast Results"),
                         ui.output_ui("forecast_status"),
+                        ui.output_ui("model_plot_filter"),
                         output_widget("plot", height="380px", fill=False, fillable=False),
                         ui.output_ui("model_accuracy"),
                         full_screen=True,

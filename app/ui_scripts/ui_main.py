@@ -17,7 +17,7 @@ FONT_AWESOME_CSS = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/cs
 app_ui = ui.page_navbar(
     ui.head_content(
         ui.tags.link(rel="stylesheet", href=FONT_AWESOME_CSS),
-        ui.tags.link(rel="stylesheet", href="custom.css?v=ops-20260521p"),
+        ui.tags.link(rel="stylesheet", href="custom.css?v=ops-20260521t"),
     ),
     data_tab(),
     summary_tab(),
