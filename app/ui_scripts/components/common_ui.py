@@ -29,15 +29,3 @@ def download_button(input_id, label, icon_class=None, class_="btn-info"):
 def file_input(input_id, label, accept=None):
     """Wrapper for file input control."""
     return ui.input_file(input_id, label, accept=accept)
-
-def get_custom_head():
-    """Return common head tags used across the app (styles/scripts)."""
-    return ui.tags.head(
-        ui.tags.link(
-            rel="stylesheet",
-            href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css",
-        ),
-        ui.tags.link(rel="stylesheet", href="custom.css"),
-        ui.tags.script(src="https://code.jquery.com/jquery-3.6.0.min.js"),
-        ui.tags.script(src="custom.js"),
-    )

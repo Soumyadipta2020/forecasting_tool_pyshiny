@@ -9,9 +9,6 @@ used across the application components.
 # ===== IMPORTS =====
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-from prophet import Prophet
-from statsmodels.tsa.arima.model import ARIMA
 import warnings
 
 # ===== GLOBAL SETTINGS =====
@@ -43,4 +40,4 @@ def calculate_metrics(actual, predicted):
         'Value': [f"{mape:.2f}%", f"{rmse:.2f}", f"{mae:.2f}"]
     })
     
-    return metrics_df
+    return metrics_df 
