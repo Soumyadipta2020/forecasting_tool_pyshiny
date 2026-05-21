@@ -48,6 +48,10 @@ def forecast_tab():
                             "model",
                             "Select Time Series Model(s)",
                             choices=[
+                                "Naive",
+                                "Seasonal Naive",
+                                "Moving Average",
+                                "Drift",
                                 "ARIMA",
                                 "SARIMA",
                                 "GRNN",
@@ -108,8 +112,8 @@ def forecast_tab():
                     ui.input_select(
                         "best_model_metric",
                         "Best Model Metric",
-                        choices=["MAPE", "RMSE", "MAE", "R2", "BIC", "Accuracy"],
-                        selected="MAPE",
+                        choices=["MAPE", "sMAPE", "MASE", "WAPE", "MdAPE", "RMSE", "MAE", "R2", "BIC", "Coverage", "Accuracy"],
+                        selected="MASE",
                     ),
                     ui.input_action_button(
                         "forecast",
@@ -144,6 +148,40 @@ def forecast_tab():
                         ui.card_header(_icon("microchip"), " Model Summary"),
                         ui.output_text_verbatim("fitted_model"),
                         full_screen=True,
+                    ),
+                    ui.panel_conditional(
+                        "input.data_type === 'Time Series'",
+                        ui.card(
+                            ui.card_header(_icon("stethoscope"), " Forecast Diagnostics"),
+                            ui.output_ui("residual_diagnostics"),
+                            output_widget("residual_diagnostics_plot", height="320px", fill=False, fillable=False),
+                            full_screen=True,
+                        ),
+                    ),
+                    ui.panel_conditional(
+                        "input.data_type === 'Time Series'",
+                        ui.card(
+                            ui.card_header(_icon("clock-rotate-left"), " Backtesting"),
+                            output_widget("backtesting_plot", height="320px", fill=False, fillable=False),
+                            full_screen=True,
+                        ),
+                    ),
+                    ui.panel_conditional(
+                        "input.data_type === 'Time Series'",
+                        ui.card(
+                            ui.card_header(_icon("triangle-exclamation"), " Anomaly Detection"),
+                            ui.output_ui("anomaly_report"),
+                            output_widget("anomaly_plot", height="300px", fill=False, fillable=False),
+                            full_screen=True,
+                        ),
+                    ),
+                    ui.panel_conditional(
+                        "input.data_type === 'Time Series'",
+                        ui.card(
+                            ui.card_header(_icon("lightbulb"), " Forecast Explainability"),
+                            output_widget("forecast_explainability_plot", height="300px", fill=False, fillable=False),
+                            full_screen=True,
+                        ),
                     ),
                     ui.panel_conditional(
                         "input.data_type === 'Non-Time Series'",

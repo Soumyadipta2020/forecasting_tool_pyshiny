@@ -638,12 +638,24 @@ def server_function(input, output, session):
     def _as_error(message):
         return {"ok": False, "message": message}
 
-    def _regression_metrics(actual, predicted, k=2):
+    def _regression_metrics(actual, predicted, k=2, training_series=None, lower=None, upper=None):
         actual = np.asarray(actual, dtype=float)
         predicted = np.asarray(predicted, dtype=float)
         mask = np.isfinite(actual) & np.isfinite(predicted)
         if not mask.any():
-            return {"MAE": np.nan, "RMSE": np.nan, "MAPE": np.nan, "R2": np.nan, "BIC": np.nan}
+            return {
+                "MAE": np.nan,
+                "RMSE": np.nan,
+                "MAPE": np.nan,
+                "sMAPE": np.nan,
+                "MASE": np.nan,
+                "WAPE": np.nan,
+                "MdAPE": np.nan,
+                "R2": np.nan,
+                "BIC": np.nan,
+                "Coverage": np.nan,
+                "Avg Width": np.nan,
+            }
 
         actual = actual[mask]
         predicted = predicted[mask]
@@ -654,6 +666,18 @@ def server_function(input, output, session):
         rmse = float(np.sqrt(ssr / n))
         nonzero = actual != 0
         mape = float(np.mean(np.abs(errors[nonzero] / actual[nonzero])) * 100) if nonzero.any() else np.nan
+        mdape = float(np.median(np.abs(errors[nonzero] / actual[nonzero])) * 100) if nonzero.any() else np.nan
+        smape_denominator = np.abs(actual) + np.abs(predicted)
+        smape_mask = smape_denominator != 0
+        smape = float(np.mean(2 * np.abs(errors[smape_mask]) / smape_denominator[smape_mask]) * 100) if smape_mask.any() else np.nan
+        actual_sum = float(np.sum(np.abs(actual)))
+        wape = float(np.sum(np.abs(errors)) / actual_sum * 100) if actual_sum else np.nan
+
+        scale_source = np.asarray(training_series if training_series is not None else actual, dtype=float)
+        scale_source = scale_source[np.isfinite(scale_source)]
+        naive_scale = float(np.mean(np.abs(np.diff(scale_source)))) if len(scale_source) > 1 else np.nan
+        mase = float(mae / naive_scale) if np.isfinite(naive_scale) and naive_scale != 0 else np.nan
+
         total = float(np.sum((actual - np.mean(actual)) ** 2))
         r2 = float(1 - ssr / total) if total else np.nan
         
@@ -662,8 +686,37 @@ def server_function(input, output, session):
             bic = float(n * np.log(ssr / n) + k * np.log(n))
         else:
             bic = np.nan
-            
-        return {"MAE": mae, "RMSE": rmse, "MAPE": mape, "R2": r2, "BIC": bic}
+
+        coverage = np.nan
+        avg_width = np.nan
+        if lower is not None and upper is not None:
+            lower = np.asarray(lower, dtype=float)
+            upper = np.asarray(upper, dtype=float)
+            interval_mask = mask.copy()
+            if len(lower) == len(mask) and len(upper) == len(mask):
+                lower = lower[interval_mask]
+                upper = upper[interval_mask]
+            elif len(lower) != len(actual) or len(upper) != len(actual):
+                lower = upper = np.asarray([], dtype=float)
+            if len(lower) == len(actual) and len(upper) == len(actual):
+                interval_valid = np.isfinite(lower) & np.isfinite(upper)
+                if interval_valid.any():
+                    coverage = float(np.mean((actual[interval_valid] >= lower[interval_valid]) & (actual[interval_valid] <= upper[interval_valid])) * 100)
+                    avg_width = float(np.mean(upper[interval_valid] - lower[interval_valid]))
+
+        return {
+            "MAE": mae,
+            "RMSE": rmse,
+            "MAPE": mape,
+            "sMAPE": smape,
+            "MASE": mase,
+            "WAPE": wape,
+            "MdAPE": mdape,
+            "R2": r2,
+            "BIC": bic,
+            "Coverage": coverage,
+            "Avg Width": avg_width,
+        }
 
     def _classification_metrics(actual, predicted):
         actual = np.asarray(actual)
@@ -712,6 +765,183 @@ def server_function(input, output, session):
 
         actual_axis = np.arange(1, len(df) + 1)
         return actual_axis, np.arange(len(df) + 1, len(df) + horizon + 1), "Sequence"
+
+    def _time_series_profile(df, response_column=None):
+        time_column = input.time_variable()
+        profile = {
+            "time_column": time_column if time_column in df.columns else None,
+            "frequency": None,
+            "frequency_label": "sequence",
+            "detected_period": None,
+            "trend": "flat",
+            "date_gaps": 0,
+            "duplicate_timestamps": 0,
+            "notes": [],
+        }
+
+        if response_column in df.columns:
+            y = pd.to_numeric(df[response_column], errors="coerce").dropna().astype(float)
+            if len(y) >= 3:
+                slope = np.polyfit(np.arange(len(y)), y.to_numpy(), 1)[0]
+                denom = np.nanstd(y.to_numpy()) or 1.0
+                profile["trend"] = "upward" if slope > denom * 0.02 else "downward" if slope < -denom * 0.02 else "flat"
+                profile["detected_period"] = _detect_seasonal_period(y)
+
+        if time_column not in df.columns:
+            return profile
+
+        parsed_dates = pd.to_datetime(df[time_column], errors="coerce").dropna().sort_values()
+        if len(parsed_dates) < 3:
+            return profile
+
+        unique_dates = pd.Series(parsed_dates.unique()).sort_values()
+        profile["duplicate_timestamps"] = int(parsed_dates.duplicated().sum())
+        inferred = pd.infer_freq(unique_dates)
+        profile["frequency"] = inferred
+        if inferred:
+            profile["frequency_label"] = inferred
+            try:
+                expected = pd.date_range(unique_dates.iloc[0], unique_dates.iloc[-1], freq=inferred)
+                profile["date_gaps"] = max(0, len(expected) - len(unique_dates))
+            except Exception:
+                profile["date_gaps"] = 0
+        else:
+            diffs = unique_dates.diff().dropna()
+            median_step = diffs.median() if not diffs.empty else pd.NaT
+            if pd.notna(median_step) and median_step != pd.Timedelta(0):
+                profile["date_gaps"] = int((diffs > median_step * 1.5).sum())
+                if median_step <= pd.Timedelta(hours=1):
+                    profile["frequency_label"] = "sub-daily"
+                elif median_step <= pd.Timedelta(days=1):
+                    profile["frequency_label"] = "daily-ish"
+                elif median_step <= pd.Timedelta(days=8):
+                    profile["frequency_label"] = "weekly-ish"
+                elif median_step <= pd.Timedelta(days=32):
+                    profile["frequency_label"] = "monthly-ish"
+
+        period = profile.get("detected_period")
+        if not period:
+            freq_label = str(profile["frequency_label"]).upper()
+            if freq_label.startswith("D") or "DAILY" in freq_label:
+                profile["detected_period"] = 7
+            elif freq_label.startswith("W") or "WEEKLY" in freq_label:
+                profile["detected_period"] = 52
+            elif freq_label.startswith("M") or "MONTH" in freq_label:
+                profile["detected_period"] = 12
+            elif freq_label.startswith("Q"):
+                profile["detected_period"] = 4
+            elif freq_label.startswith("H") or "SUB-DAILY" in freq_label:
+                profile["detected_period"] = 24
+
+        if profile["date_gaps"]:
+            profile["notes"].append(f"{profile['date_gaps']} possible missing time periods")
+        if profile["duplicate_timestamps"]:
+            profile["notes"].append(f"{profile['duplicate_timestamps']} duplicate timestamps")
+        return profile
+
+    def _conformal_interval(future, y, fitted=None, validation_actual=None, validation_predicted=None):
+        future = np.asarray(future, dtype=float)
+        residuals = np.asarray([], dtype=float)
+        if validation_actual is not None and validation_predicted is not None:
+            validation_actual = np.asarray(validation_actual, dtype=float)
+            validation_predicted = np.asarray(validation_predicted, dtype=float)
+            mask = np.isfinite(validation_actual) & np.isfinite(validation_predicted)
+            residuals = np.abs(validation_actual[mask] - validation_predicted[mask])
+        if residuals.size < 3 and fitted is not None:
+            fitted = np.asarray(fitted, dtype=float)
+            y = np.asarray(y, dtype=float)
+            mask = np.isfinite(y) & np.isfinite(fitted)
+            residuals = np.abs(y[mask] - fitted[mask])
+        if residuals.size < 3:
+            residuals = np.abs(np.diff(np.asarray(y, dtype=float)))
+            residuals = residuals[np.isfinite(residuals)]
+        if residuals.size == 0:
+            radius = np.full(len(future), 1.0)
+        else:
+            q = float(np.nanquantile(residuals, 0.95))
+            if not np.isfinite(q) or q == 0:
+                q = float(np.nanstd(residuals)) or 1.0
+            radius = q * np.sqrt(np.arange(1, len(future) + 1))
+        return future - radius, future + radius
+
+    def _residual_diagnostics(y, fitted):
+        y = np.asarray(y, dtype=float)
+        fitted = np.asarray(fitted, dtype=float)
+        mask = np.isfinite(y) & np.isfinite(fitted)
+        residuals = y[mask] - fitted[mask]
+        diagnostics = {
+            "n": int(len(residuals)),
+            "mean_residual": np.nan,
+            "residual_std": np.nan,
+            "bias": "N/A",
+            "ljung_box_p": np.nan,
+            "normality_p": np.nan,
+            "residuals": residuals,
+        }
+        if len(residuals) == 0:
+            return diagnostics
+
+        diagnostics["mean_residual"] = float(np.mean(residuals))
+        diagnostics["residual_std"] = float(np.std(residuals, ddof=1)) if len(residuals) > 1 else 0.0
+        tolerance = diagnostics["residual_std"] / max(np.sqrt(len(residuals)), 1)
+        diagnostics["bias"] = "over-forecasting" if diagnostics["mean_residual"] < -tolerance else "under-forecasting" if diagnostics["mean_residual"] > tolerance else "low bias"
+
+        try:
+            from statsmodels.stats.diagnostic import acorr_ljungbox
+
+            lag = max(1, min(10, len(residuals) // 3))
+            lb = acorr_ljungbox(residuals, lags=[lag], return_df=True)
+            diagnostics["ljung_box_p"] = float(lb["lb_pvalue"].iloc[-1])
+        except Exception:
+            pass
+
+        try:
+            from scipy import stats as scipy_stats
+
+            if len(residuals) >= 8:
+                diagnostics["normality_p"] = float(scipy_stats.normaltest(residuals).pvalue)
+        except Exception:
+            pass
+        return diagnostics
+
+    def _detect_anomalies(y, axis=None):
+        values = pd.Series(pd.to_numeric(y, errors="coerce")).astype(float)
+        if values.dropna().empty:
+            return pd.DataFrame(columns=["Index", "Axis", "Actual", "Score", "Reason"])
+
+        rolling_window = max(5, min(21, len(values) // 5 or 5))
+        rolling_median = values.rolling(rolling_window, center=True, min_periods=3).median().fillna(values.median())
+        residual = values - rolling_median
+        mad = float(np.nanmedian(np.abs(residual - np.nanmedian(residual))))
+        robust_sigma = 1.4826 * mad if mad else float(np.nanstd(residual)) or 1.0
+        robust_z = residual / robust_sigma
+
+        q1 = values.quantile(0.25)
+        q3 = values.quantile(0.75)
+        iqr = q3 - q1
+        lower = q1 - 1.5 * iqr
+        upper = q3 + 1.5 * iqr
+        flags = (robust_z.abs() >= 3.5) | (values < lower) | (values > upper)
+
+        axis_values = list(axis) if axis is not None else list(range(1, len(values) + 1))
+        rows = []
+        for idx in np.where(flags.fillna(False))[0]:
+            reasons = []
+            if abs(robust_z.iloc[idx]) >= 3.5:
+                reasons.append("rolling residual")
+            if values.iloc[idx] < lower or values.iloc[idx] > upper:
+                reasons.append("IQR")
+            axis_value = axis_values[idx] if idx < len(axis_values) else idx + 1
+            rows.append(
+                {
+                    "Index": int(idx + 1),
+                    "Axis": axis_value.strftime("%Y-%m-%d") if hasattr(axis_value, "strftime") else axis_value,
+                    "Actual": float(values.iloc[idx]),
+                    "Score": float(robust_z.iloc[idx]),
+                    "Reason": ", ".join(reasons),
+                }
+            )
+        return pd.DataFrame(rows)
 
     def _fit_arima_family(values, horizon, model_name, seasonal_period=1):
         from statsmodels.tsa.arima.model import ARIMA
@@ -787,16 +1017,72 @@ def server_function(input, output, session):
         ).fit(optimized=True)
         return np.asarray(fit.fittedvalues, dtype=float), np.asarray(fit.forecast(horizon), dtype=float), str(fit.summary()), None, None
 
-    def _lagged_matrix(values, lags):
+    def _fit_baseline_model(values, horizon, model_name, seasonal_period=1):
+        y = np.asarray(values, dtype=float)
+        n = len(y)
+        if model_name == "Seasonal Naive":
+            period = max(1, int(seasonal_period or 1))
+            if period <= 1 or n <= period:
+                fitted, future, summary, _, _ = _fit_baseline_model(y, horizon, "Naive", seasonal_period)
+                return fitted, future, "Seasonal naive fell back to naive because there is not enough seasonal history.", None, None
+            fitted = np.full(n, np.nan)
+            fitted[period:] = y[:-period]
+            repeats = np.resize(y[-period:], horizon)
+            return fitted, repeats.astype(float), f"Model: Seasonal Naive\nSeasonal period: {period}", None, None
+
+        if model_name == "Moving Average":
+            window = max(2, min(n, int(seasonal_period or 3) if seasonal_period and seasonal_period > 1 else 3))
+            fitted = np.full(n, np.nan)
+            for idx in range(1, n):
+                start = max(0, idx - window)
+                fitted[idx] = np.mean(y[start:idx])
+            history = list(y)
+            future = []
+            for _ in range(horizon):
+                next_value = float(np.mean(history[-window:]))
+                future.append(next_value)
+                history.append(next_value)
+            return fitted, np.asarray(future, dtype=float), f"Model: Moving Average\nWindow: {window}", None, None
+
+        if model_name == "Drift":
+            slope = (y[-1] - y[0]) / max(n - 1, 1)
+            fitted = y[0] + slope * np.arange(n)
+            future = np.asarray([y[-1] + slope * (step + 1) for step in range(horizon)], dtype=float)
+            return fitted, future, f"Model: Drift\nSlope per period: {slope:.6g}", None, None
+
+        fitted = np.full(n, np.nan)
+        fitted[1:] = y[:-1]
+        future = np.repeat(y[-1], horizon).astype(float)
+        return fitted, future, "Model: Naive\nForecast repeats the last observed value.", None, None
+
+    def _lagged_matrix(values, lags, seasonal_period=1):
         y = np.asarray(values, dtype=float)
         x_rows = []
         y_rows = []
-        for index in range(lags, len(y)):
-            x_rows.append(y[index - lags:index])
-            y_rows.append(y[index])
-        return np.asarray(x_rows), np.asarray(y_rows)
+        feature_names = [f"lag_{lag}" for lag in range(1, lags + 1)]
+        feature_names += ["rolling_mean_3", "rolling_mean_6", "rolling_mean_12", "rolling_std_6", "trend_index"]
+        if seasonal_period and seasonal_period > 1:
+            feature_names += ["season_sin", "season_cos"]
 
-    def _fit_lagged_regressor(values, horizon, model_name):
+        def features_at(history, index):
+            row = [history[-lag] if len(history) >= lag else history[0] for lag in range(1, lags + 1)]
+            for window in (3, 6, 12):
+                window_values = history[-min(window, len(history)):]
+                row.append(float(np.mean(window_values)))
+            std_values = history[-min(6, len(history)):]
+            row.append(float(np.std(std_values, ddof=1)) if len(std_values) > 1 else 0.0)
+            row.append(float(index))
+            if seasonal_period and seasonal_period > 1:
+                angle = 2 * np.pi * (index % seasonal_period) / seasonal_period
+                row.extend([float(np.sin(angle)), float(np.cos(angle))])
+            return row
+
+        for index in range(lags, len(y)):
+            x_rows.append(features_at(y[:index], index))
+            y_rows.append(y[index])
+        return np.asarray(x_rows), np.asarray(y_rows), feature_names, features_at
+
+    def _fit_lagged_regressor(values, horizon, model_name, seasonal_period=1):
         from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
         from sklearn.kernel_ridge import KernelRidge
         from sklearn.neural_network import MLPRegressor
@@ -805,7 +1091,7 @@ def server_function(input, output, session):
 
         y = np.asarray(values, dtype=float)
         lags = max(1, min(12, len(y) // 3))
-        x_train, y_train = _lagged_matrix(y, lags)
+        x_train, y_train, feature_names, features_at = _lagged_matrix(y, lags, seasonal_period)
         if len(x_train) < 2:
             raise RuntimeError("Not enough observations to train the selected machine-learning forecaster.")
 
@@ -826,32 +1112,50 @@ def server_function(input, output, session):
         fitted[lags:] = estimator.predict(x_train)
 
         history = list(y[-lags:])
+        full_history = list(y)
         future = []
-        for _ in range(horizon):
-            next_value = float(estimator.predict(np.asarray(history[-lags:]).reshape(1, -1))[0])
+        for step in range(horizon):
+            row = np.asarray(features_at(np.asarray(full_history, dtype=float), len(y) + step)).reshape(1, -1)
+            next_value = float(estimator.predict(row)[0])
             future.append(next_value)
             history.append(next_value)
+            full_history.append(next_value)
 
         summary = [
             f"Model: {model_name}",
             f"Lag features: {lags}",
+            "Engineered features: lags, rolling means, rolling volatility, trend, and seasonal Fourier terms when seasonality is detected.",
             f"Estimator: {estimator}",
         ]
-        return fitted, np.asarray(future, dtype=float), "\n".join(summary), None, None
+        final_estimator = estimator.steps[-1][1] if hasattr(estimator, "steps") else estimator
+        importance = None
+        if hasattr(final_estimator, "feature_importances_"):
+            importance = {"features": feature_names, "importance": final_estimator.feature_importances_.tolist()}
+        return fitted, np.asarray(future, dtype=float), "\n".join(summary), None, None, importance
 
-    def _fit_prophet(values, horizon):
+    def _fit_prophet(values, horizon, time_index=None, frequency=None):
         from prophet import Prophet
 
         y = np.asarray(values, dtype=float)
+        ds = None
+        if time_index is not None:
+            raw_time = pd.Series(time_index)
+            raw_numeric = pd.to_numeric(raw_time, errors="coerce")
+            looks_numeric = raw_numeric.notna().sum() >= max(2, int(len(raw_time) * 0.8))
+            parsed = pd.to_datetime(raw_time, errors="coerce") if not looks_numeric else pd.Series([pd.NaT] * len(raw_time))
+            if parsed.notna().sum() == len(y):
+                ds = parsed.iloc[: len(y)].reset_index(drop=True)
+        if ds is None:
+            ds = pd.date_range("2000-01-01", periods=len(y), freq="D")
         model_df = pd.DataFrame(
             {
-                "ds": pd.date_range("2000-01-01", periods=len(y), freq="D"),
+                "ds": ds,
                 "y": y,
             }
         )
         model = Prophet()
         model.fit(model_df)
-        future_frame = model.make_future_dataframe(periods=horizon, freq="D")
+        future_frame = model.make_future_dataframe(periods=horizon, freq=frequency or "D")
         predicted = model.predict(future_frame)
         future = predicted["yhat"].to_numpy()
         lower = predicted["yhat_lower"].to_numpy()
@@ -864,14 +1168,17 @@ def server_function(input, output, session):
         ]
         return future[: len(y)], future[len(y):], "\n".join(summary), lower[len(y):], upper[len(y):]
 
-    def _fit_time_series_model(model_name, values, horizon, seasonal_period):
+    def _fit_time_series_model(model_name, values, horizon, seasonal_period, time_index=None, frequency=None):
+        if model_name in {"Naive", "Seasonal Naive", "Moving Average", "Drift"}:
+            return (*_fit_baseline_model(values, horizon, model_name, seasonal_period), None)
         if model_name == "ETS":
-            return _fit_ets(values, horizon)
+            return (*_fit_ets(values, horizon), None)
         if model_name == "Prophet":
-            return _fit_prophet(values, horizon)
+            return (*_fit_prophet(values, horizon, time_index=time_index, frequency=frequency), None)
         if model_name in {"GRNN", "Neural Network", "AutoML"}:
-            return _fit_lagged_regressor(values, horizon, model_name)
-        return _fit_arima_family(values, horizon, model_name, seasonal_period)
+            fitted, future, summary, lower, upper, importance = _fit_lagged_regressor(values, horizon, model_name, seasonal_period)
+            return fitted, future, summary, lower, upper, importance
+        return (*_fit_arima_family(values, horizon, model_name, seasonal_period), None)
 
     def _read_positive_int(input_value, default, minimum=1):
         try:
@@ -880,7 +1187,7 @@ def server_function(input, output, session):
             return default
 
     def _higher_is_better(metric):
-        return metric in {"R2", "Accuracy"}
+        return metric in {"R2", "Accuracy", "Coverage"}
 
     def _metric_is_better(score, best_score, metric):
         if pd.isna(score):
@@ -940,7 +1247,7 @@ def server_function(input, output, session):
                     if len(train_y) < 3 or len(test_y) == 0:
                         continue
                     try:
-                        _, forecast, _, _, _ = _fit_time_series_model(model_name, train_y, len(test_y), seasonal_period)
+                        _, forecast, _, _, _, _ = _fit_time_series_model(model_name, train_y, len(test_y), seasonal_period)
                     except Exception:
                         continue
                     actual_parts.append(test_y)
@@ -948,7 +1255,7 @@ def server_function(input, output, session):
                 if actual_parts and predicted_parts:
                     validation_actual = np.concatenate(actual_parts)
                     validation_predicted = np.concatenate(predicted_parts)
-                    metrics = _regression_metrics(validation_actual, validation_predicted)
+                    metrics = _regression_metrics(validation_actual, validation_predicted, training_series=y[: n - len(validation_actual)])
                     return metrics, f"Rolling expanding-window validation: {len(actual_parts)} folds, {test_periods} periods per fold.", validation_actual, validation_predicted
 
         train_y = y[:-test_periods]
@@ -956,8 +1263,8 @@ def server_function(input, output, session):
         if len(train_y) < 3 or len(test_y) == 0:
             return _regression_metrics(y, np.full(n, np.nan)), "In-sample fallback: not enough history after holdout.", None, None
         try:
-            _, forecast, _, _, _ = _fit_time_series_model(model_name, train_y, len(test_y), seasonal_period)
-            metrics = _regression_metrics(test_y, forecast[: len(test_y)])
+            _, forecast, _, _, _, _ = _fit_time_series_model(model_name, train_y, len(test_y), seasonal_period)
+            metrics = _regression_metrics(test_y, forecast[: len(test_y)], training_series=train_y)
             return metrics, f"Last-{len(test_y)} holdout validation.", test_y, forecast[: len(test_y)]
         except Exception:
             return _regression_metrics(y, np.full(n, np.nan)), "Validation fallback: model could not refit on the training window.", None, None
@@ -987,7 +1294,9 @@ def server_function(input, output, session):
         if len(y) < 3:
             return _as_error("Select a numeric response variable with at least 3 valid observations.")
 
-        seasonal_period = int(input.seasonal_period() or 1) if input.seasonal() else 1
+        profile = _time_series_profile(model_df, response_column)
+        detected_period = profile.get("detected_period")
+        seasonal_period = int(input.seasonal_period() or detected_period or 1) if input.seasonal() else int(detected_period or 1)
 
         actual_axis, future_axis, x_label = _future_axis_from_time(model_df, horizon)
         
@@ -996,49 +1305,90 @@ def server_function(input, output, session):
         base_model_names = [m for m in model_names if m != "Ensemble"]
         if ensemble_requested and not base_model_names:
             base_model_names = ["ARIMA", "ETS", "AutoML", "Prophet"]
+        benchmark_names = ["Naive", "Seasonal Naive", "Moving Average", "Drift"]
+        base_model_names = list(dict.fromkeys(base_model_names + benchmark_names))
 
         models_dict = {}
         for model_name in base_model_names:
             try:
-                fitted, future, summary, lower, upper = _fit_time_series_model(model_name, y, horizon, seasonal_period)
+                fitted, future, summary, lower, upper, importance = _fit_time_series_model(
+                    model_name,
+                    y,
+                    horizon,
+                    seasonal_period,
+                    time_index=actual_axis,
+                    frequency=profile.get("frequency"),
+                )
             except Exception as exc:
                 continue
 
-            if lower is None or upper is None:
-                fitted_array = np.asarray(fitted, dtype=float)
-                mask = np.isfinite(y) & np.isfinite(fitted_array)
-                residual_sigma = float(np.std(y[mask] - fitted_array[mask], ddof=1)) if mask.sum() > 2 else float(np.std(y, ddof=1))
-                if not np.isfinite(residual_sigma) or residual_sigma == 0:
-                    residual_sigma = max(1.0, float(np.nanstd(y)))
-                scale = np.sqrt(np.arange(1, horizon + 1))
-                lower = np.asarray(future, dtype=float) - 1.96 * residual_sigma * scale
-                upper = np.asarray(future, dtype=float) + 1.96 * residual_sigma * scale
-
             metrics, validation_note, validation_actual, validation_predicted = _time_series_validation(model_name, y, seasonal_period)
+
+            if lower is None or upper is None:
+                lower, upper = _conformal_interval(
+                    future,
+                    y,
+                    fitted=fitted,
+                    validation_actual=validation_actual,
+                    validation_predicted=validation_predicted,
+                )
+
+            if validation_actual is not None and validation_predicted is not None and len(validation_actual) == len(validation_predicted):
+                val_lower, val_upper = _conformal_interval(validation_predicted, y, fitted=fitted)
+                metrics = _regression_metrics(
+                    validation_actual,
+                    validation_predicted,
+                    training_series=y,
+                    lower=val_lower,
+                    upper=val_upper,
+                )
+
+            diagnostics = _residual_diagnostics(y, fitted)
 
             models_dict[model_name] = {
                 "fitted": fitted,
                 "future": future,
-                "summary": f"{validation_note}\n\n{summary}",
+                "summary": f"{validation_note}\n\nPrediction intervals use native model intervals when available; otherwise they use conformal residual quantiles.\n\n{summary}",
                 "metrics": metrics,
                 "lower": lower,
                 "upper": upper,
                 "validation_actual": validation_actual,
                 "validation_predicted": validation_predicted,
+                "diagnostics": diagnostics,
+                "importance": importance,
             }
 
         if ensemble_requested and models_dict:
-            top_names = _rank_models(models_dict, selected_metric)[:3]
+            ranked_names = _rank_models(models_dict, selected_metric)
+            benchmark_score = models_dict.get("Naive", {}).get("metrics", {}).get(selected_metric, np.nan)
+            if not pd.isna(benchmark_score):
+                ranked_names = [
+                    name
+                    for name in ranked_names
+                    if name == "Naive" or _metric_is_better(models_dict[name]["metrics"].get(selected_metric, np.nan), benchmark_score, selected_metric)
+                ] or _rank_models(models_dict, selected_metric)
+            top_names = [name for name in ranked_names if name != "Ensemble"][:3]
             top_models = [models_dict[name] for name in top_names]
             all_fitted = np.vstack([np.asarray(m["fitted"], dtype=float) for m in top_models])
             all_future = np.vstack([np.asarray(m["future"], dtype=float) for m in top_models])
-            ens_fitted = np.nanmean(all_fitted, axis=0)
-            ens_future = np.nanmean(all_future, axis=0)
+
+            scores = np.asarray([models_dict[name]["metrics"].get(selected_metric, np.nan) for name in top_names], dtype=float)
+            if _higher_is_better(selected_metric):
+                clean = np.where(np.isfinite(scores), np.maximum(scores, 0), 0)
+                weights = clean / clean.sum() if clean.sum() else np.repeat(1 / len(top_names), len(top_names))
+            else:
+                clean = np.where(np.isfinite(scores) & (scores > 0), scores, np.nan)
+                inv = 1 / clean
+                weights = inv / np.nansum(inv) if np.isfinite(inv).any() and np.nansum(inv) else np.repeat(1 / len(top_names), len(top_names))
+            weights = np.asarray(weights, dtype=float)
+
+            ens_fitted = np.nansum(all_fitted * weights[:, None], axis=0)
+            ens_future = np.nansum(all_future * weights[:, None], axis=0)
 
             lower_arrays = [np.asarray(m["lower"], dtype=float) for m in top_models if m["lower"] is not None]
             upper_arrays = [np.asarray(m["upper"], dtype=float) for m in top_models if m["upper"] is not None]
-            ens_lower = np.nanmean(np.vstack(lower_arrays), axis=0) if lower_arrays else None
-            ens_upper = np.nanmean(np.vstack(upper_arrays), axis=0) if upper_arrays else None
+            ens_lower = np.nansum(np.vstack(lower_arrays) * weights[: len(lower_arrays), None], axis=0) if lower_arrays else None
+            ens_upper = np.nansum(np.vstack(upper_arrays) * weights[: len(upper_arrays), None], axis=0) if upper_arrays else None
 
             validation_pairs = [
                 (m.get("validation_actual"), m.get("validation_predicted"))
@@ -1047,24 +1397,27 @@ def server_function(input, output, session):
             ]
             if validation_pairs and all(len(pair[1]) == len(validation_pairs[0][1]) for pair in validation_pairs):
                 ens_validation_actual = validation_pairs[0][0]
-                ens_validation_predicted = np.nanmean(np.vstack([pair[1] for pair in validation_pairs]), axis=0)
-                ens_metrics = _regression_metrics(ens_validation_actual, ens_validation_predicted)
-                validation_note = f"Ensemble validation from top {len(top_names)} models: {', '.join(top_names)}."
+                ens_validation_predicted = np.nansum(np.vstack([pair[1] for pair in validation_pairs]) * weights[: len(validation_pairs), None], axis=0)
+                val_lower, val_upper = _conformal_interval(ens_validation_predicted, y, fitted=ens_fitted)
+                ens_metrics = _regression_metrics(ens_validation_actual, ens_validation_predicted, training_series=y, lower=val_lower, upper=val_upper)
+                validation_note = f"Weighted ensemble validation from top {len(top_names)} models: {', '.join(top_names)}."
             else:
                 ens_validation_actual = None
                 ens_validation_predicted = None
-                ens_metrics = _regression_metrics(y, ens_fitted)
+                ens_metrics = _regression_metrics(y, ens_fitted, training_series=y)
                 validation_note = "Ensemble validation fallback used fitted values because component backtests did not align."
 
             models_dict["Ensemble"] = {
                 "fitted": ens_fitted,
                 "future": ens_future,
-                "summary": validation_note + "\n\nMean ensemble of " + ", ".join(top_names),
+                "summary": validation_note + "\n\nWeights: " + ", ".join(f"{name}={weight:.2f}" for name, weight in zip(top_names, weights)),
                 "metrics": ens_metrics,
                 "lower": ens_lower,
                 "upper": ens_upper,
                 "validation_actual": ens_validation_actual,
                 "validation_predicted": ens_validation_predicted,
+                "diagnostics": _residual_diagnostics(y, ens_fitted),
+                "importance": None,
             }
 
         # Scenario Adjustment Logic
@@ -1111,6 +1464,8 @@ def server_function(input, output, session):
             "validation_method": input.ts_validation(),
             "test_periods": _read_positive_int(input.ts_test_periods(), _valid_horizon()),
             "scenario_adjustment": scenario_adj,
+            "profile": profile,
+            "anomalies": _detect_anomalies(y, actual_axis),
         }
 
     def _prepared_feature_frame(df, feature_columns):
@@ -1340,7 +1695,7 @@ def server_function(input, output, session):
         values = pd.Series(pd.to_numeric(y, errors="coerce")).dropna().astype(float)
         if len(values) < 12 or values.std() == 0:
             return None
-        candidates = [7, 12, 24, 30, 52]
+        candidates = [4, 5, 7, 12, 24, 30, 52]
         best_period = None
         best_corr = 0
         for period in candidates:
@@ -1350,7 +1705,25 @@ def server_function(input, output, session):
             if pd.notna(corr) and corr > best_corr:
                 best_corr = corr
                 best_period = period
-        return best_period if best_corr >= 0.35 else None
+        try:
+            from scipy.signal import periodogram
+
+            centered = values.to_numpy() - values.mean()
+            freqs, power = periodogram(centered)
+            valid = freqs > 0
+            if valid.any():
+                periods = 1 / freqs[valid]
+                power = power[valid]
+                strongest = float(periods[np.argmax(power)])
+                rounded = int(round(strongest))
+                if 2 <= rounded <= len(values) // 2:
+                    corr = values.autocorr(lag=rounded)
+                    if pd.notna(corr) and corr > best_corr:
+                        best_corr = corr
+                        best_period = rounded
+        except Exception:
+            pass
+        return best_period if best_corr >= 0.3 else None
 
     @reactive.effect
     @reactive.event(input.implement_forecasting, ignore_init=True)
@@ -1371,21 +1744,25 @@ def server_function(input, output, session):
             if not response:
                 return ui.div()
             y = pd.to_numeric(df[response], errors="coerce").dropna()
-            detected_period = _detect_seasonal_period(y)
+            profile = _time_series_profile(df, response)
+            detected_period = profile.get("detected_period")
             if len(y) < 12:
-                suggested = "ETS with a short holdout"
+                suggested = "Naive, Moving Average, and ETS with a short holdout"
                 reason = "short history"
             elif detected_period:
-                suggested = f"SARIMA or Prophet, seasonal period around {detected_period}"
-                reason = "autocorrelation suggests seasonality"
+                suggested = f"Seasonal Naive, SARIMA, Prophet, and Ensemble; seasonal period around {detected_period}"
+                reason = f"{profile.get('frequency_label', 'series')} data with seasonal signal"
             elif len(y) > 80:
-                suggested = "ARIMA, ETS, and Ensemble"
+                suggested = "ARIMA, ETS, AutoML, baselines, and weighted Ensemble"
                 reason = "enough history to compare multiple models"
             else:
-                suggested = "ARIMA or ETS"
+                suggested = "Naive, Drift, ARIMA, and ETS"
                 reason = "moderate history without strong detected seasonality"
+            profile_note = f" Trend looks {profile.get('trend', 'flat')}."
+            if profile.get("notes"):
+                profile_note += " " + "; ".join(profile["notes"]) + "."
             caution = " Clean data quality issues first." if any(count for _, count, _ in quality["rows"][:4]) else ""
-            return ui.div(ui.tags.i(class_="fa-solid fa-lightbulb"), f" Recommended: {suggested} ({reason}).{caution}", class_="alert alert-info py-2 m-2")
+            return ui.div(ui.tags.i(class_="fa-solid fa-lightbulb"), f" Recommended: {suggested} ({reason}).{profile_note}{caution}", class_="alert alert-info py-2 m-2")
         else:
             response = _preferred_response_column(df)
             if not response:
@@ -1581,7 +1958,7 @@ def server_function(input, output, session):
         best_model = result.get("best_model", "")
         best_metric = input.best_model_metric()
         
-        metric_keys = ["MAPE", "RMSE", "MAE", "R2", "BIC"] if result.get("metric_kind") != "classification" else ["Accuracy"]
+        metric_keys = ["MASE", "WAPE", "sMAPE", "MAPE", "RMSE", "MAE", "R2", "BIC", "Coverage"] if result.get("metric_kind") != "classification" else ["Accuracy"]
         
         table_html = "<div class='table-responsive mt-2 mb-4'><table class='table table-hover table-borderless align-middle' style='border: 1px solid var(--ops-border); border-radius: 8px; overflow: hidden; background: var(--ops-panel-deep);'><thead style='background: rgba(255,255,255,0.03);'><tr><th style='padding: 12px 16px;'>Model</th>"
         for k in metric_keys:
@@ -1596,7 +1973,8 @@ def server_function(input, output, session):
             for k in metric_keys:
                 val = m_data["metrics"].get(k, np.nan)
                 text_color = "color: #fff;" if is_best else "color: #dbeafe;"
-                table_html += f"<td style='padding: 12px 16px; {text_color}'>{_format_metric(val, '%' if k in ['MAPE', 'Accuracy'] else '')}</td>"
+                suffix = "%" if k in ["MAPE", "sMAPE", "WAPE", "MdAPE", "Coverage", "Accuracy"] else ""
+                table_html += f"<td style='padding: 12px 16px; {text_color}'>{_format_metric(val, suffix)}</td>"
             table_html += "</tr>"
         table_html += "</tbody></table></div>"
 
@@ -1609,11 +1987,12 @@ def server_function(input, output, session):
             cards = [("Accuracy", _format_metric(metrics.get("Accuracy"), "%"), "bullseye", "primary")]
         else:
             cards = [
-                ("MAPE", _format_metric(metrics.get("MAPE"), "%"), "percentage", "primary"),
+                ("MASE", _format_metric(metrics.get("MASE")), "scale-balanced", "primary"),
+                ("WAPE", _format_metric(metrics.get("WAPE"), "%"), "percentage", "info"),
+                ("sMAPE", _format_metric(metrics.get("sMAPE"), "%"), "chart-simple", "success"),
                 ("RMSE", _format_metric(metrics.get("RMSE")), "square-root-variable", "success"),
                 ("MAE", _format_metric(metrics.get("MAE")), "chart-simple", "warning"),
-                ("R2", _format_metric(metrics.get("R2")), "superscript", "purple"),
-                ("BIC", _format_metric(metrics.get("BIC")), "chart-line", "danger"),
+                ("Coverage", _format_metric(metrics.get("Coverage"), "%"), "umbrella", "purple"),
             ]
 
         return ui.div(
@@ -1655,6 +2034,191 @@ def server_function(input, output, session):
         for m_name, m_data in models_dict.items():
             summaries.append(f"--- {m_name} ---\n{m_data.get('summary', '')}")
         return "\n\n".join(summaries)
+
+    def _best_time_series_model_data(result):
+        if result is None or not result.get("ok") or result.get("kind") != "Time Series":
+            return None, None
+        models_dict = result.get("models", {})
+        best_model = result.get("best_model")
+        if best_model in models_dict:
+            return best_model, models_dict[best_model]
+        if models_dict:
+            first_name = next(iter(models_dict))
+            return first_name, models_dict[first_name]
+        return None, None
+
+    @output
+    @render.ui
+    def residual_diagnostics():
+        result = forecast_result.get()
+        model_name, model_data = _best_time_series_model_data(result)
+        if not model_data:
+            return ui.div("Generate a time-series forecast to see residual diagnostics.", class_="alert alert-info py-2")
+
+        diagnostics = model_data.get("diagnostics", {})
+        lb_p = diagnostics.get("ljung_box_p", np.nan)
+        normality_p = diagnostics.get("normality_p", np.nan)
+        cards = [
+            ("Residual Mean", _format_metric(diagnostics.get("mean_residual")), "chart-simple", "primary"),
+            ("Residual Std", _format_metric(diagnostics.get("residual_std")), "wave-square", "success"),
+            ("Bias", diagnostics.get("bias", "N/A"), "scale-balanced", "warning"),
+            ("Ljung-Box p", _format_metric(lb_p), "shuffle", "danger"),
+            ("Normality p", _format_metric(normality_p), "bell-curve", "info"),
+        ]
+        autocorr_note = "Residual autocorrelation looks acceptable." if pd.notna(lb_p) and lb_p >= 0.05 else "Residual autocorrelation may remain; consider seasonality, extra lags, or another model."
+        normality_note = "Residual normality is plausible." if pd.notna(normality_p) and normality_p >= 0.05 else "Residuals may be non-normal; interval quality matters more than the normality assumption."
+        return ui.div(
+            ui.div(
+                *(
+                    ui.div(
+                        ui.div(ui.tags.i(class_=f"fa-solid fa-{icon}"), class_="metric-icon"),
+                        ui.div(value, class_="metric-value"),
+                        ui.div(label, class_="metric-label"),
+                        class_=f"metric-card border-{color}",
+                    )
+                    for label, value, icon, color in cards
+                ),
+                class_="metric-grid mt-2",
+            ),
+            ui.div(f"{model_name}: {autocorr_note} {normality_note}", class_="alert alert-info py-2 mt-3"),
+        )
+
+    @output
+    @render_widget
+    def residual_diagnostics_plot():
+        result = forecast_result.get()
+        model_name, model_data = _best_time_series_model_data(result)
+        if not model_data:
+            return _empty_plotly_figure("Generate a time-series forecast to inspect residuals")
+
+        diagnostics = model_data.get("diagnostics", {})
+        residuals = np.asarray(diagnostics.get("residuals", []), dtype=float)
+        residuals = residuals[np.isfinite(residuals)]
+        if len(residuals) == 0:
+            return _empty_plotly_figure("No finite residuals are available")
+
+        from plotly.subplots import make_subplots
+
+        fig = make_subplots(rows=1, cols=2, subplot_titles=("Residuals over time", "Residual distribution"))
+        fig.add_trace(go.Scatter(x=np.arange(1, len(residuals) + 1), y=residuals, mode="lines", name="Residual"), row=1, col=1)
+        fig.add_trace(go.Histogram(x=residuals, name="Residuals", marker_color="#12c6a3", opacity=0.8), row=1, col=2)
+        fig.add_hline(y=0, line_dash="dash", line_color="#94a3b8", row=1, col=1)
+        _plotly_dark_layout(fig, title=f"Residual Diagnostics: {model_name}")
+        fig.update_xaxes(title="Observation", row=1, col=1)
+        fig.update_yaxes(title="Residual", row=1, col=1)
+        fig.update_xaxes(title="Residual", row=1, col=2)
+        fig.update_yaxes(title="Count", row=1, col=2)
+        return fig
+
+    @output
+    @render_widget
+    def backtesting_plot():
+        result = forecast_result.get()
+        if result is None or not result.get("ok") or result.get("kind") != "Time Series":
+            return _empty_plotly_figure("Generate a time-series forecast to see validation backtests")
+
+        models_dict = result.get("models", {})
+        validation_series = [
+            (name, data.get("validation_actual"), data.get("validation_predicted"))
+            for name, data in models_dict.items()
+            if data.get("validation_actual") is not None and data.get("validation_predicted") is not None
+        ]
+        if not validation_series:
+            return _empty_plotly_figure("Backtest predictions are not available for this run")
+
+        fig = go.Figure()
+        first_actual = np.asarray(validation_series[0][1], dtype=float)
+        x_axis = np.arange(1, len(first_actual) + 1)
+        fig.add_trace(go.Scatter(x=x_axis, y=first_actual, mode="lines+markers", name="Validation Actual", line={"color": "#3487ff", "width": 2.4}))
+        colors = ["#12c6a3", "#f59e0b", "#ec4899", "#8b5cf6", "#ef4444", "#3b82f6", "#22c55e"]
+        for idx, (name, _, predicted) in enumerate(validation_series):
+            predicted = np.asarray(predicted, dtype=float)
+            fig.add_trace(
+                go.Scatter(
+                    x=np.arange(1, len(predicted) + 1),
+                    y=predicted,
+                    mode="lines",
+                    name=f"{name} Backtest",
+                    line={"color": colors[idx % len(colors)], "width": 1.8},
+                )
+            )
+        _plotly_dark_layout(fig, title="Backtesting: Actual vs Predicted")
+        fig.update_xaxes(title="Validation Step")
+        fig.update_yaxes(title=result["response_column"])
+        return fig
+
+    @output
+    @render.ui
+    def anomaly_report():
+        result = forecast_result.get()
+        if result is None or not result.get("ok") or result.get("kind") != "Time Series":
+            return ui.div("Generate a time-series forecast to detect anomalies in the selected response.", class_="alert alert-info py-2")
+        anomalies = result.get("anomalies")
+        count = 0 if anomalies is None else len(anomalies)
+        if count == 0:
+            return ui.div("No major anomalies detected by rolling-residual and IQR checks.", class_="alert alert-success py-2")
+        preview = anomalies.head(5).to_dict("records")
+        return ui.div(
+            ui.div(f"{count:,} potential anomalies detected. Review them before deciding whether to cap, remove, or annotate them.", class_="alert alert-warning py-2"),
+            ui.tags.ul(*(ui.tags.li(f"{row['Axis']}: {row['Actual']:.4g} ({row['Reason']})") for row in preview)),
+        )
+
+    @output
+    @render_widget
+    def anomaly_plot():
+        result = forecast_result.get()
+        if result is None or not result.get("ok") or result.get("kind") != "Time Series":
+            return _empty_plotly_figure("Generate a time-series forecast to see anomaly markers")
+        fig = go.Figure()
+        actual_axis = result["actual_axis"]
+        actual = np.asarray(result["actual"], dtype=float)
+        fig.add_trace(go.Scatter(x=actual_axis, y=actual, mode="lines", name="Actual", line={"color": "#3487ff", "width": 2.2}))
+        anomalies = result.get("anomalies")
+        if anomalies is not None and len(anomalies):
+            anomaly_indices = anomalies["Index"].astype(int).to_numpy() - 1
+            axis_values = [actual_axis.iloc[idx] if hasattr(actual_axis, "iloc") else actual_axis[idx] for idx in anomaly_indices if 0 <= idx < len(actual)]
+            y_values = [actual[idx] for idx in anomaly_indices if 0 <= idx < len(actual)]
+            fig.add_trace(go.Scatter(x=axis_values, y=y_values, mode="markers", name="Potential anomaly", marker={"color": "#f59e0b", "size": 10, "symbol": "diamond"}))
+        _plotly_dark_layout(fig, title="Anomaly Detection")
+        fig.update_xaxes(title=result.get("x_label", "Sequence"))
+        fig.update_yaxes(title=result["response_column"])
+        return fig
+
+    @output
+    @render_widget
+    def forecast_explainability_plot():
+        result = forecast_result.get()
+        model_name, model_data = _best_time_series_model_data(result)
+        if not model_data:
+            return _empty_plotly_figure("Generate a time-series forecast to see forecasting explainability")
+
+        importance = model_data.get("importance")
+        if importance:
+            df_imp = pd.DataFrame({"Feature": importance["features"], "Importance": importance["importance"]})
+            df_imp["Abs_Importance"] = df_imp["Importance"].abs()
+            df_imp = df_imp.sort_values("Abs_Importance", ascending=True).tail(15)
+            fig = go.Figure(go.Bar(x=df_imp["Importance"], y=df_imp["Feature"], orientation="h", marker_color="#12c6a3"))
+            _plotly_dark_layout(fig, title=f"Feature Importance: {model_name}")
+            return fig
+
+        y = pd.Series(pd.to_numeric(result.get("actual", []), errors="coerce")).dropna().astype(float)
+        if len(y) < 4:
+            return _empty_plotly_figure("Not enough history for lag explainability")
+        max_lag = min(24, len(y) // 2)
+        lag_rows = []
+        for lag in range(1, max_lag + 1):
+            corr = y.autocorr(lag=lag)
+            if pd.notna(corr):
+                lag_rows.append({"Lag": f"lag_{lag}", "Autocorrelation": corr})
+        if not lag_rows:
+            return _empty_plotly_figure("No lag signal is available")
+        lag_df = pd.DataFrame(lag_rows)
+        lag_df["Abs"] = lag_df["Autocorrelation"].abs()
+        lag_df = lag_df.sort_values("Abs", ascending=True).tail(15)
+        fig = go.Figure(go.Bar(x=lag_df["Autocorrelation"], y=lag_df["Lag"], orientation="h", marker_color="#12c6a3"))
+        _plotly_dark_layout(fig, title=f"Lag Signal: {model_name}")
+        fig.update_xaxes(title="Autocorrelation")
+        return fig
 
     @output
     @render.data_frame
@@ -1719,13 +2283,13 @@ def server_function(input, output, session):
 
         df = loaded_data()
         models_dict = result.get("models", {})
-        metric_keys = ["MAPE", "RMSE", "MAE", "R2", "BIC"] if result.get("metric_kind") != "classification" else ["Accuracy"]
+        metric_keys = ["MASE", "WAPE", "sMAPE", "MAPE", "RMSE", "MAE", "R2", "BIC", "Coverage"] if result.get("metric_kind") != "classification" else ["Accuracy"]
         metric_rows = []
         for m_name, m_data in models_dict.items():
             metric_rows.append(
                 "<tr>"
                 f"<td>{escape(str(m_name))}</td>"
-                + "".join(f"<td>{escape(_format_metric(m_data['metrics'].get(k, np.nan), '%' if k in ['MAPE', 'Accuracy'] else ''))}</td>" for k in metric_keys)
+                + "".join(f"<td>{escape(_format_metric(m_data['metrics'].get(k, np.nan), '%' if k in ['MAPE', 'sMAPE', 'WAPE', 'MdAPE', 'Coverage', 'Accuracy'] else ''))}</td>" for k in metric_keys)
                 + "</tr>"
             )
 
@@ -1766,6 +2330,33 @@ def server_function(input, output, session):
                 + scenario_df.to_html(index=False)
             )
 
+        diagnostics_html = ""
+        if result.get("kind") == "Time Series":
+            best = result.get("best_model")
+            diagnostics = models_dict.get(best, {}).get("diagnostics", {}) if best in models_dict else {}
+            if diagnostics:
+                diagnostics_df = pd.DataFrame(
+                    {
+                        "Diagnostic": ["Residual mean", "Residual std", "Bias", "Ljung-Box p", "Normality p"],
+                        "Value": [
+                            _format_metric(diagnostics.get("mean_residual")),
+                            _format_metric(diagnostics.get("residual_std")),
+                            diagnostics.get("bias", "N/A"),
+                            _format_metric(diagnostics.get("ljung_box_p")),
+                            _format_metric(diagnostics.get("normality_p")),
+                        ],
+                    }
+                )
+                diagnostics_html = "<h2>Residual Diagnostics</h2>" + diagnostics_df.to_html(index=False)
+
+        anomaly_html = ""
+        if result.get("kind") == "Time Series" and result.get("anomalies") is not None:
+            anomalies = result["anomalies"]
+            if len(anomalies):
+                anomaly_html = "<h2>Anomalies</h2>" + anomalies.to_html(index=False)
+            else:
+                anomaly_html = "<h2>Anomalies</h2><p>No major anomalies detected.</p>"
+
         table = result["table"].copy()
         if "Axis" in table.columns:
             table["Axis"] = table["Axis"].apply(lambda value: value.strftime("%Y-%m-%d") if hasattr(value, "strftime") else value)
@@ -1779,6 +2370,8 @@ def server_function(input, output, session):
             ("Test periods", result.get("test_periods", "")),
             ("Train split", result.get("train_split", "")),
             ("Scenario adjustment", result.get("scenario_adjustment", "")),
+            ("Detected frequency", result.get("profile", {}).get("frequency_label", "")),
+            ("Detected seasonal period", result.get("profile", {}).get("detected_period", "")),
         ]
         settings_html = "<table>" + "".join(f"<tr><th>{escape(str(k))}</th><td>{escape(str(v))}</td></tr>" for k, v in settings_rows if v not in (None, "")) + "</table>"
 
@@ -1800,6 +2393,8 @@ def server_function(input, output, session):
             <div class="section"><h2>Model Settings</h2>{settings_html}</div>
             <div class="section"><h2>Forecast Chart</h2>{chart_html}</div>
             <div class="section"><h2>Model Comparison</h2><table><tr><th>Model</th>{''.join(f'<th>{escape(k)}</th>' for k in metric_keys)}</tr>{''.join(metric_rows)}</table></div>
+            <div class="section">{diagnostics_html}</div>
+            <div class="section">{anomaly_html}</div>
             <div class="section">{quality_html}</div>
             <div class="section">{summary_html}</div>
             <div class="section">{explainability_html}</div>
