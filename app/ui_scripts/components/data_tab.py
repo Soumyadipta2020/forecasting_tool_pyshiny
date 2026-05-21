@@ -8,8 +8,8 @@ def _icon(name: str):
 def data_tab():
     return ui.nav_panel(
         "Data",
-        ui.layout_sidebar(
-            ui.sidebar(
+        ui.div(
+            ui.layout_columns(
                 ui.card(
                     ui.card_header(_icon("database"), " Data Source"),
                     ui.input_select(
@@ -59,23 +59,25 @@ def data_tab():
                         ),
                         class_="button-column",
                     ),
+                    class_="data-source-card",
                 ),
-                width=340,
-            ),
-            ui.div(
-                ui.output_ui("info_data"),
-                ui.card(
-                    ui.card_header(_icon("chart-line"), " Quick Visualization"),
-                    ui.layout_columns(
-                        ui.input_select("y_variable_graph", "Select Y Variable", choices=[]),
-                        ui.input_select("x_variables_graph", "Select X Variable", choices=[]),
-                        col_widths=[6, 6],
+                ui.div(
+                    ui.output_ui("info_data"),
+                    ui.card(
+                        ui.card_header(_icon("chart-line"), " Quick Visualization"),
+                        ui.layout_columns(
+                            ui.input_select("y_variable_graph", "Select Y Variable", choices=[]),
+                            ui.input_select("x_variables_graph", "Select X Variable", choices=[]),
+                            col_widths=[6, 6],
+                        ),
+                        ui.output_plot("vis_data", height="420px"),
+                        full_screen=True,
                     ),
-                    ui.output_plot("vis_data", height="420px"),
-                    full_screen=True,
+                    class_="data-main-panel",
                 ),
-                class_="data-main-panel",
+                col_widths=[4, 8],
             ),
+            class_="data-page-grid",
         ),
         value="data",
     )

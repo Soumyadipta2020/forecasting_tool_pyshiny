@@ -16,7 +16,7 @@ APP_DIR = Path(__file__).resolve().parent
 SAMPLE_FILE = APP_DIR / "timeseries_demo.csv"
 
 
-PLOT_BG = "#1b2638"
+PLOT_BG = "#1f2b3d"
 PLOT_GRID = "#334155"
 PLOT_TEXT = "#e5edf8"
 
@@ -46,7 +46,7 @@ def _plotly_dark_layout(fig, title=None):
         paper_bgcolor=PLOT_BG,
         plot_bgcolor=PLOT_BG,
         font={"color": PLOT_TEXT},
-        margin={"l": 48, "r": 24, "t": 56, "b": 48},
+        margin={"l": 48, "r": 24, "t": 48, "b": 32},
     )
     fig.update_xaxes(gridcolor=PLOT_GRID, zerolinecolor="#475569")
     fig.update_yaxes(gridcolor=PLOT_GRID, zerolinecolor="#475569")
@@ -881,16 +881,7 @@ def server_function(input, output, session):
     @reactive.effect
     @reactive.event(input.implement_forecasting, ignore_init=True)
     def _implement_forecasting_from_summary():
-        df = loaded_data()
-        if df is None:
-            forecast_result.set(_as_error("Load data before running a forecast."))
-            ui.notification_show("Load data before running a forecast.", type="error", duration=4)
-            return
-
-        response_column = _preferred_response_column(df, prefer_summary=True)
-        _update_forecast_controls(df, response_column, select_all_x=True)
         ui.update_navset("main_nav", selected="forecasting", session=session)
-        forecast_result.set(_build_forecast_result(response_column=response_column, prefer_summary_response=True))
 
     @reactive.effect
     @reactive.event(input.forecast, ignore_init=True)

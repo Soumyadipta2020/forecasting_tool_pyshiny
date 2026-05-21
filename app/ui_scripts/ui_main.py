@@ -21,18 +21,20 @@ def _icon(name: str):
 app_ui = ui.page_navbar(
     ui.head_content(
         ui.tags.link(rel="stylesheet", href=FONT_AWESOME_CSS),
-        ui.tags.link(rel="stylesheet", href="custom.css?v=dark-20260518"),
+        ui.tags.link(rel="stylesheet", href="custom.css?v=ops-20260521i"),
     ),
     data_tab(),
     summary_tab(),
     forecast_tab(),
     about_tab(),
-    ui.nav_spacer(),
-    ui.nav_control(ui.input_dark_mode(mode="dark")),
-    title=ui.span(
-        ui.img(src="brand_logo.png", height="32", class_="brand-logo"),
-        "AI Forecasting App ",
-        ui.span("v.0.03.4", class_="version-badge"),
+    title=ui.div(
+        ui.div(ui.img(src="brand_logo.png", height="36", class_="brand-logo"), class_="brand-mark"),
+        ui.div(
+            ui.div("AI Forecasting", class_="brand-title"),
+            ui.div("FORECASTING INTELLIGENCE", class_="brand-subtitle"),
+            class_="brand-copy",
+        ),
+        class_="brand-lockup",
     ),
     id="main_nav",
     selected="data",

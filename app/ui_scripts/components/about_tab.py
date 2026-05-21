@@ -2,53 +2,21 @@ from shiny import ui
 
 
 CHANGELOGS = [
-    ("2024-09-09", ["Sample data added"]),
-    ("2024-09-03", ["Bug fixes & Adjustments"]),
-    ("2024-08-12", ["State Space ARIMA, ARFIMA forecasting models added"]),
-    ("2024-07-29", ["Prophet, GRNN, Neural Network forecasting model added"]),
     (
-        "2024-07-13",
+        "2026-05-21",
         [
-            "Model summary added for fitted models in forecasting tab",
-            "Switching between forecast plot and model summary is now possible",
-        ],
-    ),
-    (
-        "2024-07-11",
-        [
-            "Histogram added for summary statistics visualization",
-            "Variance, IQR & Standard deviation added for summary statistics",
-            "LASSO & Ridge Regression issue resolved",
-            "Accuracy metrics added for models",
-            "Actuals added in forecast download",
-            "Fitted values used as forecast value during actual period",
-        ],
-    ),
-    (
-        "2024-07-07",
-        [
-            "Data info added at homepage",
-            "New tab created - Summary Statistics",
-            "Boxplot, Violin Plot added",
-            "Missing value imputation added",
-        ],
-    ),
-    (
-        "2024-07-03",
-        [
-            "Multimodal AI Chatbot added",
-            "Outlier treatment added",
-            "Data visualization added",
-            "File template & error handling added",
+            "Modern UI implemented",
+            "All functionalities implemented",
         ],
     ),
 ]
 
 
 def _change_card(date: str, items: list[str]):
-    return ui.accordion_panel(
-        date,
-        ui.tags.ul(*(ui.tags.li(item) for item in items), class_="tick-list"),
+    return ui.div(
+        ui.div(date, class_="changelog-date"),
+        ui.tags.ul(*(ui.tags.li(item) for item in items), class_="tick-list changelog-items"),
+        class_="changelog-card",
     )
 
 
@@ -80,6 +48,6 @@ def about_tab():
             ),
         ),
         ui.h3("Latest Changelogs"),
-        ui.accordion(*(_change_card(date, items) for date, items in CHANGELOGS), id="changelog"),
+        *(_change_card(date, items) for date, items in CHANGELOGS),
         value="about",
     )
