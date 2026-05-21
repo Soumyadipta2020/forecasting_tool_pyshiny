@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from shiny import reactive, render, ui
-from shinywidgets import render_widget
+from shinywidgets import output_widget, render_widget
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -1303,10 +1303,9 @@ def server_function(input, output, session):
         selected_metric = input.best_model_metric()
         ensemble_requested = "Ensemble" in model_names
         base_model_names = [m for m in model_names if m != "Ensemble"]
+        base_model_names = list(dict.fromkeys(base_model_names))
         if ensemble_requested and not base_model_names:
-            base_model_names = ["ARIMA", "ETS", "AutoML", "Prophet"]
-        benchmark_names = ["Naive", "Seasonal Naive", "Moving Average", "Drift"]
-        base_model_names = list(dict.fromkeys(base_model_names + benchmark_names))
+            return _as_error("Select at least one base model along with Ensemble. The app only runs models selected in the settings bar.")
 
         models_dict = {}
         for model_name in base_model_names:
@@ -1368,6 +1367,8 @@ def server_function(input, output, session):
                     if name == "Naive" or _metric_is_better(models_dict[name]["metrics"].get(selected_metric, np.nan), benchmark_score, selected_metric)
                 ] or _rank_models(models_dict, selected_metric)
             top_names = [name for name in ranked_names if name != "Ensemble"][:3]
+            if not top_names:
+                return _as_error("Select at least one base model along with Ensemble.")
             top_models = [models_dict[name] for name in top_names]
             all_fitted = np.vstack([np.asarray(m["fitted"], dtype=float) for m in top_models])
             all_future = np.vstack([np.asarray(m["future"], dtype=float) for m in top_models])
@@ -1868,6 +1869,8 @@ def server_function(input, output, session):
 
         models_dict = result.get("models", {})
         selected_set = set(selected_models) if selected_models is not None else None
+        visible_model_count = len(selected_set) if selected_set is not None else len(models_dict)
+        visible_model_count = max(1, visible_model_count)
         colors = ["rgb(18, 198, 163)", "rgb(245, 158, 11)", "rgb(236, 72, 153)", "rgb(139, 92, 246)", "rgb(239, 68, 68)", "rgb(59, 130, 246)"]
         color_idx = 0
         
@@ -1933,6 +1936,8 @@ def server_function(input, output, session):
             )
 
         _plotly_dark_layout(fig, title=f"Actual vs Forecast: {result['response_column']}")
+        dynamic_height = min(900, max(540, 440 + visible_model_count * 45))
+        fig.update_layout(height=dynamic_height, margin={"l": 48, "r": 24, "t": 48, "b": min(220, 96 + visible_model_count * 14)})
         fig.update_xaxes(title=result.get("x_label", "Sequence"))
         fig.update_yaxes(title=result["response_column"])
         return fig
@@ -1946,6 +1951,26 @@ def server_function(input, output, session):
         except Exception:
             selected_models = None
         return _forecast_figure(forecast_result.get(), selected_models)
+
+    @output
+    @render.ui
+    def forecast_plot_container():
+        result = forecast_result.get()
+        selected_models = None
+        try:
+            selected_models = _normalize_selection(input.plot_models())
+        except Exception:
+            selected_models = None
+
+        if result is None or not result.get("ok"):
+            selected_count = 1
+        else:
+            model_names = list(result.get("models", {}).keys())
+            selected_count = len(selected_models) if selected_models is not None else len(model_names)
+            selected_count = max(1, selected_count)
+
+        height = min(900, max(540, 440 + selected_count * 45))
+        return output_widget("plot", height=f"{height}px", fill=False, fillable=False)
 
     @output
     @render.ui
@@ -1992,7 +2017,6 @@ def server_function(input, output, session):
                 ("sMAPE", _format_metric(metrics.get("sMAPE"), "%"), "chart-simple", "success"),
                 ("RMSE", _format_metric(metrics.get("RMSE")), "square-root-variable", "success"),
                 ("MAE", _format_metric(metrics.get("MAE")), "chart-simple", "warning"),
-                ("Coverage", _format_metric(metrics.get("Coverage"), "%"), "umbrella", "purple"),
             ]
 
         return ui.div(
@@ -2063,7 +2087,7 @@ def server_function(input, output, session):
             ("Residual Std", _format_metric(diagnostics.get("residual_std")), "wave-square", "success"),
             ("Bias", diagnostics.get("bias", "N/A"), "scale-balanced", "warning"),
             ("Ljung-Box p", _format_metric(lb_p), "shuffle", "danger"),
-            ("Normality p", _format_metric(normality_p), "bell-curve", "info"),
+            ("Normality p", _format_metric(normality_p), "chart-area", "info"),
         ]
         autocorr_note = "Residual autocorrelation looks acceptable." if pd.notna(lb_p) and lb_p >= 0.05 else "Residual autocorrelation may remain; consider seasonality, extra lags, or another model."
         normality_note = "Residual normality is plausible." if pd.notna(normality_p) and normality_p >= 0.05 else "Residuals may be non-normal; interval quality matters more than the normality assumption."

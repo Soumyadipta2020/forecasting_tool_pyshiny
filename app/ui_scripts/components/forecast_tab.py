@@ -140,7 +140,7 @@ def forecast_tab():
                         ui.card_header(_icon("chart-line"), " Forecast Results"),
                         ui.output_ui("forecast_status"),
                         ui.output_ui("model_plot_filter"),
-                        output_widget("plot", height="380px", fill=False, fillable=False),
+                        ui.output_ui("forecast_plot_container"),
                         ui.output_ui("model_accuracy"),
                         full_screen=True,
                     ),
