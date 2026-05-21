@@ -26,7 +26,7 @@ app_ui = ui.page_navbar(
     title=ui.div(
         ui.div(ui.img(src="brand_logo.png", height="36", class_="brand-logo"), class_="brand-mark"),
         ui.div(
-            ui.div("AI Forecasting", class_="brand-title"),
+            ui.div("Forecasting App", class_="brand-title"),
             ui.div("FORECASTING INTELLIGENCE", class_="brand-subtitle"),
             class_="brand-copy",
         ),
@@ -35,7 +35,7 @@ app_ui = ui.page_navbar(
     id="main_nav",
     selected="data",
     navbar_options=ui.navbar_options(bg="#101827", theme="dark", underline=True),
-    window_title="AI Forecasting App",
+    window_title="Forecasting App",
     header=ui.tags.script(src="custom.js"),
     footer=ui.div(
         ui.span(ui.img(src="brand_logo.png", height="22"), " (c) 2023"),
