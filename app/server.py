@@ -19,6 +19,31 @@ SAMPLE_FILE = APP_DIR / "timeseries_demo.csv"
 PLOT_BG = "#1f2b3d"
 PLOT_GRID = "#334155"
 PLOT_TEXT = "#e5edf8"
+TIME_SERIES_MODEL_CHOICES = [
+    "Naive",
+    "Seasonal Naive",
+    "Moving Average",
+    "Drift",
+    "ARIMA",
+    "SARIMA",
+    "ETS",
+    "State Space ARIMA",
+    "Prophet",
+    "GRNN",
+    "ARFIMA",
+    "ARCH",
+    "GARCH",
+    "Neural Network",
+    "AutoML",
+    "Ensemble",
+]
+TABULAR_MODEL_CHOICES = [
+    "Linear Regression",
+    "GLM",
+    "LASSO",
+    "Ridge Regression",
+    "Logistic Regression",
+]
 
 
 def _plotly_dark_layout(fig, title=None):
@@ -63,6 +88,7 @@ def _empty_plotly_figure(message):
 
 
 def server_function(input, output, session):
+    data_cleanup_options = reactive.Value({"remove_duplicates": False})
     @reactive.calc
     def loaded_data():
         try:
@@ -70,8 +96,14 @@ def server_function(input, output, session):
                 file_info = input.file()
                 if not file_info:
                     return None
-                return pd.read_csv(file_info[0]["datapath"])
-            return pd.read_csv(SAMPLE_FILE)
+                df = pd.read_csv(file_info[0]["datapath"])
+            else:
+                df = pd.read_csv(SAMPLE_FILE)
+
+            cleanup = data_cleanup_options.get()
+            if cleanup.get("remove_duplicates"):
+                df = df.drop_duplicates().reset_index(drop=True)
+            return df
         except Exception as exc:
             ui.notification_show(f"Could not load data: {exc}", type="error", duration=4)
             return None
@@ -105,7 +137,8 @@ def server_function(input, output, session):
         if current_y not in y_choices:
             current_y = next((column for column in numeric_columns if column in y_choices), y_choices[0])
 
-        ui.update_select("time_variable", choices=columns, selected=columns[0], session=session)
+        selected_time = _likely_time_column(df) or columns[0]
+        ui.update_select("time_variable", choices=columns, selected=selected_time, session=session)
         ui.update_select("y_variable_graph", choices=y_choices, selected=current_y, session=session)
         ui.update_select(
             "x_variables_graph",
@@ -287,7 +320,51 @@ def server_function(input, output, session):
                 ),
                 class_="quality-recommendations compact",
             ),
+            ui.div(
+                ui.input_action_button(
+                    "apply_missing_imputation",
+                    "Use interpolation",
+                    icon=ui.tags.i(class_="fa-solid fa-wand-magic-sparkles"),
+                    class_="btn-info",
+                    disabled=quality["rows"][0][1] == 0,
+                ),
+                ui.input_action_button(
+                    "apply_outlier_capping",
+                    "Cap outliers",
+                    icon=ui.tags.i(class_="fa-solid fa-scissors"),
+                    class_="btn-info",
+                    disabled=not bool(quality["outliers"]),
+                ),
+                ui.input_action_button(
+                    "remove_duplicate_rows",
+                    "Remove duplicates",
+                    icon=ui.tags.i(class_="fa-solid fa-copy"),
+                    class_="btn-secondary",
+                    disabled=not any(issue == "Duplicate rows" and count for issue, count, _ in quality["rows"]),
+                ),
+                class_="quality-action-row",
+            ),
         )
+
+    @reactive.effect
+    @reactive.event(input.apply_missing_imputation, ignore_init=True)
+    def _apply_missing_imputation():
+        ui.update_checkbox("preprocess_interpolate", value=True, session=session)
+        ui.notification_show("Interpolation enabled in Forecast advanced settings.", type="message", duration=4)
+
+    @reactive.effect
+    @reactive.event(input.apply_outlier_capping, ignore_init=True)
+    def _apply_outlier_capping():
+        ui.update_checkbox("preprocess_outliers", value=True, session=session)
+        ui.notification_show("Outlier capping enabled in Forecast advanced settings.", type="message", duration=4)
+
+    @reactive.effect
+    @reactive.event(input.remove_duplicate_rows, ignore_init=True)
+    def _remove_duplicate_rows():
+        options = data_cleanup_options.get().copy()
+        options["remove_duplicates"] = True
+        data_cleanup_options.set(options)
+        ui.notification_show("Duplicate rows removed from the active dataset.", type="message", duration=4)
 
     @output
     @render_widget
@@ -576,8 +653,74 @@ def server_function(input, output, session):
 
     forecast_result = reactive.Value(None)
 
+    def _as_tuple(value):
+        if value is None:
+            return ()
+        if isinstance(value, str):
+            return (value,)
+        try:
+            return tuple(value)
+        except TypeError:
+            return (value,)
+
+    def _forecast_signature():
+        return (
+            input.data_source(),
+            input.time_variable(),
+            input.data_type(),
+            input.response_variable(),
+            _valid_horizon(),
+            _as_tuple(input.model()),
+            _as_tuple(input.model1()),
+            _as_tuple(input.x_variables()),
+            bool(input.preprocess_interpolate()),
+            bool(input.preprocess_outliers()),
+            float(input.scenario_adj() or 0),
+            bool(input.seasonal()),
+            int(input.seasonal_period() or 0),
+            input.ts_validation(),
+            int(input.ts_test_periods() or 0),
+            int(input.rolling_folds() or 0),
+            int(input.rolling_initial_pct() or 0),
+            input.best_model_metric(),
+            bool(input.use_backtesting()),
+            input.tabular_split_mode(),
+            int(input.train_split() or 0),
+            int(input.tabular_test_rows() or 0),
+            bool(input.use_scenario()),
+            input.scenario_feature(),
+            input.scenario_value(),
+        )
+
+    def _forecast_is_stale(result):
+        return bool(result and result.get("ok") and result.get("signature") != _forecast_signature())
+
     def _numeric_columns(df):
         return df.select_dtypes(include="number").columns.tolist()
+
+    def _likely_time_column(df):
+        if df is None or df.empty:
+            return None
+        name_tokens = ("date", "time", "year", "month", "period", "week", "day")
+        columns = df.columns.tolist()
+        for column in columns:
+            if any(token in column.lower() for token in name_tokens):
+                return column
+        for column in columns:
+            parsed = pd.to_datetime(df[column], errors="coerce")
+            if parsed.notna().sum() >= max(3, int(len(df) * 0.75)):
+                return column
+        return columns[0] if columns else None
+
+    def _likely_response_column(df):
+        numeric_columns = _numeric_columns(df)
+        if not numeric_columns:
+            return None
+        name_tokens = ("sales", "price", "revenue", "demand", "forecast", "value", "amount", "quantity", "volume")
+        for column in numeric_columns:
+            if any(token in column.lower() for token in name_tokens):
+                return column
+        return numeric_columns[0]
 
     def _valid_horizon():
         try:
@@ -598,7 +741,7 @@ def server_function(input, output, session):
         if current_graph_y in numeric_columns:
             return current_graph_y
 
-        return numeric_columns[0]
+        return _likely_response_column(df) or numeric_columns[0]
 
     def _feature_columns(df, response_column):
         selected_columns = [
@@ -1345,6 +1488,7 @@ def server_function(input, output, session):
             return _as_error("Select at least one base model along with Ensemble. The app only runs models selected in the settings bar.")
 
         models_dict = {}
+        failed_models = {}
         for model_name in base_model_names:
             try:
                 fitted, future, summary, lower, upper, importance = _fit_time_series_model(
@@ -1356,6 +1500,7 @@ def server_function(input, output, session):
                     frequency=profile.get("frequency"),
                 )
             except Exception as exc:
+                failed_models[model_name] = str(exc)
                 continue
 
             metrics, validation_note, validation_actual, validation_predicted = _time_series_validation(model_name, y, seasonal_period)
@@ -1470,7 +1615,8 @@ def server_function(input, output, session):
                     m_data["upper"] = m_data["upper"] * adj_factor
 
         if not models_dict:
-            return _as_error("Could not fit any of the selected models.")
+            detail = "; ".join(f"{name}: {message}" for name, message in failed_models.items())
+            return _as_error("Could not fit any of the selected models." + (f" Details: {detail}" if detail else ""))
 
         best_model = _select_best_model(models_dict, selected_metric)
 
@@ -1504,6 +1650,7 @@ def server_function(input, output, session):
             "scenario_adjustment": scenario_adj,
             "profile": profile,
             "anomalies": _detect_anomalies(y, actual_axis),
+            "failed_models": failed_models,
         }
 
     def _prepared_feature_frame(df, feature_columns):
@@ -1581,6 +1728,7 @@ def server_function(input, output, session):
         x_test = x_frame.iloc[idx_test]
 
         models_dict = {}
+        failed_models = {}
         metric_kind = "regression"
         for model_name in model_names:
             try:
@@ -1599,6 +1747,7 @@ def server_function(input, output, session):
                     importance = {"features": x_frame.columns.tolist(), "importance": coef.tolist()}
                 else:
                     if model_name == "Logistic Regression":
+                        failed_models[model_name] = "Logistic Regression requires a categorical target with 20 or fewer classes."
                         continue
                     y = y_numeric.loc[keep_rows].astype(float).reset_index(drop=True)
                     y_tr, y_te = y.iloc[idx_train], y.iloc[idx_test]
@@ -1637,6 +1786,7 @@ def server_function(input, output, session):
                         summary = _sklearn_regression_summary("Linear Regression", model, x_frame.columns.tolist())
                         importance = {"features": x_frame.columns.tolist(), "importance": model.coef_.tolist()}
             except Exception:
+                failed_models[model_name] = "Model fitting failed. Check variable types, missing values, or target suitability."
                 continue
 
             models_dict[model_name] = {
@@ -1648,7 +1798,8 @@ def server_function(input, output, session):
             }
 
         if not models_dict:
-            return _as_error("Could not fit any of the selected models.")
+            detail = "; ".join(f"{name}: {message}" for name, message in failed_models.items())
+            return _as_error("Could not fit any of the selected models." + (f" Details: {detail}" if detail else ""))
 
         best_metric = input.best_model_metric()
         if metric_kind == "classification":
@@ -1712,6 +1863,7 @@ def server_function(input, output, session):
             "scenario_feature": scenario_feature if scenario_predictions else None,
             "scenario_value": scenario_value if scenario_predictions else None,
             "scenario_predictions": scenario_predictions,
+            "failed_models": failed_models,
         }
 
     def _build_forecast_result():
@@ -1809,6 +1961,13 @@ def server_function(input, output, session):
                 "seasonal": bool(detected_period),
                 "seasonal_period": detected_period or 12,
                 "metric": "MASE",
+                "details": [
+                    ("History", f"{len(y):,} valid observations"),
+                    ("Frequency", profile.get("frequency_label", "sequence")),
+                    ("Seasonality", detected_period or "Not detected"),
+                    ("Trend", profile.get("trend", "flat")),
+                    ("Validation", input.ts_validation()),
+                ],
             }
 
         feature_cols = _feature_columns(df, response_column)
@@ -1828,6 +1987,12 @@ def server_function(input, output, session):
             "reason": reason,
             "note": caution.strip(),
             "metric": "RMSE",
+            "details": [
+                ("Rows", f"{len(df):,}"),
+                ("Predictors", f"{len(feature_cols):,}"),
+                ("Validation", input.tabular_split_mode() if input.use_backtesting() else "In-sample fit"),
+                ("Recommended metric", "RMSE"),
+            ],
         }
 
     @reactive.calc
@@ -1850,6 +2015,21 @@ def server_function(input, output, session):
                 ui.span(f"Recommended for {settings['response']}: {suggested} ({settings['reason']}).{note}"),
                 class_="recommendation-copy",
             ),
+            ui.tags.details(
+                ui.tags.summary("Why this recommendation"),
+                ui.div(
+                    *(
+                        ui.div(
+                            ui.span(label, class_="recommendation-detail-label"),
+                            ui.span(str(value), class_="recommendation-detail-value"),
+                            class_="recommendation-detail-row",
+                        )
+                        for label, value in settings.get("details", [])
+                    ),
+                    class_="recommendation-detail-grid",
+                ),
+                class_="recommendation-details",
+            ),
             ui.input_action_button(
                 "apply_recommendation",
                 "Use recommended settings",
@@ -1868,11 +2048,13 @@ def server_function(input, output, session):
             return
 
         if input.data_type() == "Time Series":
-            ui.update_selectize("model", selected=settings["models"], session=session)
+            selected_models = [model for model in settings["models"] if model in TIME_SERIES_MODEL_CHOICES]
+            ui.update_selectize("model", choices=TIME_SERIES_MODEL_CHOICES, selected=selected_models, session=session)
             ui.update_checkbox("seasonal", value=settings.get("seasonal", False), session=session)
             ui.update_numeric("seasonal_period", value=settings.get("seasonal_period", 12), session=session)
         else:
-            ui.update_selectize("model1", selected=settings["models"], session=session)
+            selected_models = [model for model in settings["models"] if model in TABULAR_MODEL_CHOICES]
+            ui.update_selectize("model1", choices=TABULAR_MODEL_CHOICES, selected=selected_models, session=session)
         ui.update_select("best_model_metric", selected=settings.get("metric", "MASE"), session=session)
         ui.notification_show("Recommended settings applied.", type="message", duration=3)
 
@@ -1893,10 +2075,11 @@ def server_function(input, output, session):
         ready = _forecast_is_ready()
         result = forecast_result.get()
         report_ready = bool(result and result.get("ok"))
+        is_stale = _forecast_is_stale(result)
         return ui.div(
             ui.input_action_button(
                 "forecast",
-                "Generate Forecast",
+                "Regenerate Forecast" if is_stale else "Generate Forecast",
                 icon=ui.tags.i(class_="fa-solid fa-arrow-right"),
                 class_="btn-primary w-100",
                 disabled=not ready,
@@ -1918,13 +2101,47 @@ def server_function(input, output, session):
             class_="button-column",
         )
 
+    @output
+    @render.ui
+    def report_preview():
+        result = forecast_result.get()
+        if result is None or not result.get("ok"):
+            return ui.div()
+        sections = ["Model settings", "Forecast chart", "Model comparison", "Forecast data"]
+        if loaded_data() is not None:
+            sections.extend(["Data quality", "Summary statistics"])
+        if result.get("kind") == "Time Series":
+            sections.extend(["Residual diagnostics", "Anomalies", "Forecast explainability"])
+        else:
+            sections.extend(["Validation summary", "Feature importance"])
+        if result.get("scenario_predictions"):
+            sections.append("Scenario forecast")
+        return ui.div(
+            ui.div("Report preview", class_="report-preview-title"),
+            ui.tags.ul(*(ui.tags.li(section) for section in sections), class_="report-preview-list"),
+            class_="report-preview",
+        )
+
     @reactive.effect
     @reactive.event(input.forecast, ignore_init=True)
     def _generate_forecast_from_forecast_tab():
         if not _forecast_is_ready():
             ui.notification_show("Choose a response variable and at least one model before generating a forecast.", type="warning", duration=4)
             return
-        forecast_result.set(_build_forecast_result())
+        signature = _forecast_signature()
+        ui.notification_show("Forecast run started. Training and comparing selected models...", type="message", duration=3)
+        try:
+            with ui.Progress(min=0, max=1, session=session) as progress:
+                progress.set(0.15, message="Preparing data", detail="Checking selected target, features, and preprocessing.")
+                result = _build_forecast_result()
+                progress.set(0.85, message="Finalizing output", detail="Building plots, metrics, and report data.")
+        except Exception:
+            result = _build_forecast_result()
+        if isinstance(result, dict):
+            result["signature"] = signature
+        forecast_result.set(result)
+        if result.get("ok"):
+            ui.notification_show("Forecast complete.", type="message", duration=3)
 
     @output
     @render.ui
@@ -1944,7 +2161,16 @@ def server_function(input, output, session):
         else:
             forecast_scope = f"{result.get('train_split', 100)}% training split"
             horizon_label = f"{len(result.get('table', [])):,} scored rows"
+        failure_count = len(result.get("failed_models", {}))
         return ui.div(
+            ui.div(
+                "Settings changed after this forecast. Regenerate before downloading or sharing results.",
+                class_="alert alert-warning py-2",
+            ) if _forecast_is_stale(result) else ui.div(),
+            ui.div(
+                f"{failure_count} selected model(s) failed; successful models are still shown.",
+                class_="alert alert-warning py-2",
+            ) if failure_count else ui.div(),
             ui.div(
                 ui.div(ui.tags.i(class_="fa-solid fa-circle-check"), class_="forecast-hero-icon"),
                 ui.div(
@@ -2112,6 +2338,47 @@ def server_function(input, output, session):
         height = min(900, max(540, 440 + selected_count * 45))
         return output_widget("plot", height=f"{height}px", fill=False, fillable=False)
 
+    def _quality_verdict(result):
+        if result is None or not result.get("ok"):
+            return None
+        models_dict = result.get("models", {})
+        best_model = result.get("best_model")
+        metrics = models_dict.get(best_model, {}).get("metrics", result.get("metrics", {}))
+        if result.get("metric_kind") == "classification":
+            accuracy = metrics.get("Accuracy", np.nan)
+            if pd.notna(accuracy) and accuracy >= 85:
+                return "Good fit", "Validation accuracy is strong for the selected split.", "success"
+            if pd.notna(accuracy) and accuracy >= 65:
+                return "Use with caution", "Validation accuracy is moderate; compare with business tolerance.", "warning"
+            return "Weak validation", "Accuracy is low or unavailable. Review features, target quality, and split method.", "danger"
+
+        mase = metrics.get("MASE", np.nan)
+        coverage = metrics.get("Coverage", np.nan)
+        smape = metrics.get("sMAPE", np.nan)
+        if pd.notna(mase) and mase < 1 and (pd.isna(coverage) or coverage >= 70):
+            return "Good fit", "Best model beats a naive benchmark and interval coverage looks usable.", "success"
+        if (pd.notna(mase) and mase < 1.5) or (pd.notna(smape) and smape < 25):
+            return "Use with caution", "Validation is acceptable but should be checked against business tolerance.", "warning"
+        return "Weak validation", "The selected model does not clearly outperform simple baselines. Try another model or clean the data.", "danger"
+
+    @output
+    @render.ui
+    def forecast_quality_verdict():
+        result = forecast_result.get()
+        verdict = _quality_verdict(result)
+        if verdict is None:
+            return ui.div()
+        title, detail, color = verdict
+        stale_note = " Settings changed since this run; regenerate before using the verdict." if _forecast_is_stale(result) else ""
+        return ui.div(
+            ui.div(ui.tags.i(class_="fa-solid fa-gauge-high"), class_="quality-verdict-icon"),
+            ui.div(
+                ui.div(title, class_="quality-verdict-title"),
+                ui.div(detail + stale_note, class_="quality-verdict-detail"),
+            ),
+            class_=f"quality-verdict quality-verdict-{color}",
+        )
+
     @output
     @render.ui
     def model_accuracy():
@@ -2219,6 +2486,12 @@ def server_function(input, output, session):
         summaries = []
         for m_name, m_data in models_dict.items():
             summaries.append(f"--- {m_name} ---\n{m_data.get('summary', '')}")
+        failed_models = result.get("failed_models", {})
+        if failed_models:
+            summaries.append(
+                "--- Models that did not run ---\n"
+                + "\n".join(f"{name}: {message}" for name, message in failed_models.items())
+            )
         return "\n\n".join(summaries)
 
     def _best_time_series_model_data(result):
@@ -2413,6 +2686,15 @@ def server_function(input, output, session):
         if result is None or not result.get("ok"):
             return pd.DataFrame()
         table = result["table"].copy()
+        if input.compact_forecast_table():
+            best_model = result.get("best_model")
+            base_columns = [column for column in ["Axis", "Sequence", "Actual"] if column in table.columns]
+            model_columns = [
+                column
+                for column in table.columns
+                if best_model and column.startswith(f"{best_model}_")
+            ]
+            table = table[base_columns + model_columns] if model_columns else table[base_columns or table.columns.tolist()]
         if "Axis" in table.columns:
             table["Axis"] = table["Axis"].apply(lambda value: value.strftime("%Y-%m-%d") if hasattr(value, "strftime") else value)
         return render.DataGrid(table, width="100%", height="400px", filters=True, selection_mode="none")
