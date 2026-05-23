@@ -40,13 +40,7 @@ def summary_tab():
         ),
         ui.card(
             ui.card_header(_icon("arrow-right"), " Next Step"),
-            ui.p("Review the summary statistics and visualization, then continue to forecasting."),
-            ui.input_action_button(
-                "implement_forecasting",
-                "Implement Forecasting",
-                icon=_icon("chart-line"),
-                class_="btn-primary",
-            ),
+            ui.output_ui("summary_next_actions"),
         ),
         value="summary",
     )

@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "beta", "ui_modifications"]
+  pull_request:
+    branches: ["main", "beta"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r app/requirements.txt
+
+      - name: Syntax check
+        run: |
+          python -m py_compile app/app.py app/server.py app/ui_scripts/components/forecast_tab.py app/server_scripts/helpers/modeling.py
+
+      - name: Run tests
+        run: |
+          python -m pytest

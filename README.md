@@ -11,16 +11,15 @@ A PyShiny application for time series forecasting using various AI and statistic
 
 ## Features
 
--   Upload CSV data or use sample data from MongoDB
--   Interactive data visualization and editing
--   Multiple forecasting models:
-    -   Prophet
-    -   Auto ARIMA
-    -   LSTM (Deep Learning)
-    -   AutoML (H2O)
-    -   ARFIMA
--   Forecast metrics and evaluation
--   Modern, responsive UI
+-   Upload CSV data or use the bundled sample time-series dataset
+-   Guided workflow from data quality review to summary statistics, forecasting, and report export
+-   Data quality checks for missing values, duplicates, outliers, mixed numeric/text columns, and date gaps
+-   Interactive visualizations and summary statistics
+-   Time-series forecasting with baseline, statistical, volatility, intermittent-demand, Prophet, and ensemble model options
+-   Non-time-series regression/classification-style model comparison with linear, regularized, tree-based, boosting, and SVM models
+-   Optional compact hyperparameter tuning for supported models
+-   Holdout and rolling validation, residual diagnostics, anomaly detection, explainability, prediction interval quality, and forecast metrics
+-   Downloadable forecast results, summary statistics, and full HTML reports
 
 ## Installation
 
@@ -31,7 +30,7 @@ A PyShiny application for time series forecasting using various AI and statistic
 pip install -r requirements.txt
 ```
 
-3.  Make sure you have MongoDB installed and running (optional, for sample data functionality)
+3.  No database is required for the bundled sample dataset.
 
 ## Usage
 
@@ -49,30 +48,4 @@ The application expects CSV files with at least one time column and one or more 
 
 ## Models
 
-### Prophet
-
-Facebook's Prophet model for time series forecasting with support for yearly, weekly, and daily seasonality.
-
-### Auto ARIMA
-
-Automatic ARIMA model selection with support for seasonal components.
-
-### LSTM
-
-Long Short-Term Memory neural network for sequence prediction.
-
-### AutoML
-
-H2O AutoML for automated machine learning model selection and training.
-
-### ARFIMA
-
-AutoRegressive Fractionally Integrated Moving Average model.
-
-## Author
-
-Soumyadipta Das
-
-## Version
-
-0.03.3
+The forecasting workspace includes options such as Naive, Seasonal Naive, Moving Average, Drift, ARIMA, Auto ARIMA, SARIMA, ETS, Prophet, Theta, Croston, GRNN, Neural Network, AutoML-style regressors, State Space ARIMA, ARCH/GARCH, and Ensemble. ARFIMA is explicitly labeled in-app as an ARIMA approximation. For tabular data, the app includes Linear Regression, GLM, Logistic Regression, LASSO, Elastic Net, Ridge Regression, Random Forest, Gradient Boosting, and SVM.
