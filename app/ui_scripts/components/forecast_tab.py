@@ -136,6 +136,21 @@ def forecast_tab():
                     class_="forecast-control-card",
                 ),
                 ui.div(
+                    ui.tags.style(
+                        """
+                        #forecast_workspace.card-header-tabs .nav-link.active,
+                        #forecast_workspace.card-header-tabs .nav-link[aria-selected="true"],
+                        #forecast_workspace.nav-tabs .nav-link.active,
+                        #forecast_workspace.nav-tabs .nav-link[aria-selected="true"] {
+                            border-color: rgba(52, 135, 255, 0.56) !important;
+                            background: #243247 !important;
+                            background-color: #243247 !important;
+                            background-image: none !important;
+                            color: #ffffff !important;
+                            box-shadow: inset 0 3px 0 #3487ff !important;
+                        }
+                        """
+                    ),
                     ui.navset_card_tab(
                         ui.nav_panel(
                             "Results",

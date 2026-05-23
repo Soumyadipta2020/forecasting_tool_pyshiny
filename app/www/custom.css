@@ -290,6 +290,72 @@ aside.sidebar,
   min-height: 0 !important;
 }
 
+.nav-tabs {
+  border-bottom-color: rgba(148, 163, 184, 0.18) !important;
+}
+
+.nav-tabs .nav-link {
+  border-color: transparent !important;
+  background: transparent !important;
+  color: var(--ops-blue) !important;
+  font-weight: 900;
+}
+
+.nav-tabs .nav-link:hover,
+.nav-tabs .nav-link:focus {
+  border-color: rgba(52, 135, 255, 0.36) !important;
+  background: rgba(52, 135, 255, 0.12) !important;
+  color: #dbeafe !important;
+}
+
+.nav-tabs .nav-link.active,
+.nav-tabs .nav-item.show .nav-link {
+  border-color: rgba(52, 135, 255, 0.54) !important;
+  background: var(--ops-panel-soft) !important;
+  color: #ffffff !important;
+  box-shadow: inset 0 3px 0 var(--ops-blue);
+}
+
+.forecast-main-panel,
+#forecast_workspace {
+  --bs-nav-tabs-link-active-bg: var(--ops-panel-soft);
+  --bs-nav-tabs-link-active-color: #ffffff;
+  --bs-nav-tabs-link-active-border-color: rgba(52, 135, 255, 0.56);
+}
+
+#forecast_workspace.card-header-tabs .nav-link.active,
+#forecast_workspace.card-header-tabs .nav-link[aria-selected="true"],
+#forecast_workspace.nav-tabs .nav-link.active,
+#forecast_workspace.nav-tabs .nav-link[aria-selected="true"] {
+  border-color: rgba(52, 135, 255, 0.56) !important;
+  background: var(--ops-panel-soft) !important;
+  background-color: var(--ops-panel-soft) !important;
+  background-image: none !important;
+  color: #ffffff !important;
+  box-shadow: inset 0 3px 0 var(--ops-blue) !important;
+}
+
+.forecast-main-panel .nav-link.active,
+.forecast-main-panel .nav-link[aria-selected="true"],
+.forecast-main-panel .nav-tabs .nav-link.active,
+.forecast-main-panel .nav-pills .nav-link.active,
+.forecast-main-panel .bslib-card .nav-link.active {
+  border-color: rgba(52, 135, 255, 0.56) !important;
+  background: var(--ops-panel-soft) !important;
+  background-color: var(--ops-panel-soft) !important;
+  background-image: none !important;
+  color: #ffffff !important;
+  box-shadow: inset 0 3px 0 var(--ops-blue) !important;
+}
+
+.forecast-main-panel .nav-link.active:hover,
+.forecast-main-panel .nav-link[aria-selected="true"]:hover,
+.forecast-main-panel .nav-link.active:focus,
+.forecast-main-panel .nav-link[aria-selected="true"]:focus {
+  background-color: var(--ops-panel-soft) !important;
+  color: #ffffff !important;
+}
+
 .js-plotly-plot,
 .plotly,
 .plot-container,
@@ -466,66 +532,113 @@ label,
 
 .recommendation-panel {
   display: grid;
-  gap: 0.75rem;
-  margin: 0.2rem 0 0.95rem;
-  padding: 0.8rem;
-  border: 1px solid rgba(6, 182, 240, 0.34);
-  border-radius: 8px;
-  background: rgba(6, 182, 240, 0.1);
-  color: #b9efff;
+  gap: 1rem;
+  margin: 0.4rem 0 1.15rem;
+  color: #dbeafe;
 }
 
-.recommendation-copy {
+.recommendation-card {
+  --bs-card-spacer-y: 0.9rem;
+  --bs-card-spacer-x: 0.9rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.34);
+  box-shadow: none;
+}
+
+.recommendation-card::before,
+.bslib-card.recommendation-card::before {
+  display: none;
+}
+
+.recommendation-card-main {
+  border-color: rgba(6, 182, 240, 0.34);
+  background: rgba(6, 182, 240, 0.1);
+}
+
+.recommendation-content {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.recommendation-heading {
   display: flex;
-  align-items: flex-start;
-  gap: 0.55rem;
-  font-size: 0.85rem;
+  align-items: center;
+  gap: 0.65rem;
+  color: #f8fbff;
+  font-size: 0.82rem;
   font-weight: 800;
   line-height: 1.35;
+  text-transform: uppercase;
 }
 
-.recommendation-copy .fa-solid {
-  margin-top: 0.12rem;
+.recommendation-heading .fa-solid {
   color: var(--ops-cyan);
 }
 
+.recommendation-copy,
+.recommendation-note {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+
+.recommendation-copy {
+  color: #f8fbff;
+  font-weight: 800;
+}
+
+.recommendation-note {
+  color: #b8c7dd;
+  font-weight: 650;
+}
+
 .recommendation-details {
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  border-radius: 8px;
-  background: rgba(24, 34, 52, 0.55);
+  border: 0;
+  background: transparent;
 }
 
 .recommendation-details summary {
   cursor: pointer;
-  padding: 0.55rem 0.65rem;
+  padding: 0 0 0.75rem;
   color: #dbeafe;
-  font-size: 0.76rem;
+  font-size: 0.82rem;
   font-weight: 900;
+  line-height: 1.35;
 }
 
 .recommendation-detail-grid {
   display: grid;
-  gap: 0.35rem;
-  padding: 0 0.65rem 0.65rem;
+  gap: 0.7rem;
+  padding: 0;
 }
 
 .recommendation-detail-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.75rem;
+  display: grid;
+  grid-template-columns: minmax(6.5rem, 0.75fr) minmax(0, 1fr);
+  column-gap: 1rem;
+  row-gap: 0.2rem;
+  align-items: start;
   color: var(--ops-text);
-  font-size: 0.78rem;
+  font-size: 0.8rem;
+  line-height: 1.35;
 }
 
 .recommendation-detail-label {
   color: var(--ops-muted);
   font-weight: 850;
+  white-space: nowrap;
 }
 
 .recommendation-detail-value {
   min-width: 0;
   overflow-wrap: anywhere;
-  text-align: right;
+  text-align: left;
+  color: #f8fbff;
+  font-weight: 750;
+}
+
+.recommendation-action {
+  padding: 0 0.05rem;
 }
 
 .advanced-forecast-settings {

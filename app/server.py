@@ -108,6 +108,10 @@ def server_function(input, output, session):
             ui.notification_show(f"Could not load data: {exc}", type="error", duration=4)
             return None
 
+    @reactive.calc
+    def selected_time_column():
+        return input.time_variable()
+
     @reactive.effect
     def _sync_data_inputs():
         df = loaded_data()
@@ -185,7 +189,7 @@ def server_function(input, output, session):
             class_="stat-grid",
         )
 
-    def _data_quality_summary(df):
+    def _build_data_quality_summary(df, selected_time):
         rows = []
         recommendations = []
 
@@ -237,7 +241,6 @@ def server_function(input, output, session):
 
         date_gap_detail = "No date column selected"
         date_gap_count = 0
-        selected_time = input.time_variable()
         if selected_time in df.columns:
             parsed_dates = pd.to_datetime(df[selected_time], errors="coerce").dropna().sort_values()
             if len(parsed_dates) >= 3:
@@ -272,14 +275,20 @@ def server_function(input, output, session):
             "non_numeric": non_numeric_issues,
         }
 
+    @reactive.calc
+    def data_quality_summary():
+        df = loaded_data()
+        if df is None:
+            return None
+        return _build_data_quality_summary(df, selected_time_column())
+
     @output
     @render.ui
     def data_quality_report():
-        df = loaded_data()
-        if df is None:
+        quality = data_quality_summary()
+        if quality is None:
             return ui.div("Load data to see missing values, duplicates, outliers, date gaps, and cleanup guidance.", class_="alert alert-info py-2")
 
-        quality = _data_quality_summary(df)
         visual_meta = {
             "Duplicate rows": ("copy", "warning"),
             "Outlier count": ("triangle-exclamation", "purple"),
@@ -448,16 +457,15 @@ def server_function(input, output, session):
             return [selection] if selection else []
         return [column for column in selection if column]
 
-    def _summary_time_columns(df):
+    def _build_summary_time_columns(df, selected_time):
         time_columns = set()
-        selected_time = input.time_variable()
         if selected_time in df.columns:
             time_columns.add(selected_time)
         time_columns.update(df.select_dtypes(include=["datetime", "datetimetz"]).columns.tolist())
         return time_columns
 
-    def _summary_variable_choices(df):
-        time_columns = _summary_time_columns(df)
+    def _build_summary_variable_choices(df, selected_time):
+        time_columns = _build_summary_time_columns(df, selected_time)
         return [column for column in df.columns.tolist() if column not in time_columns]
 
     def _format_summary_value(value):
@@ -542,6 +550,22 @@ def server_function(input, output, session):
         fig.update_yaxes(visible=False)
         return fig
 
+    @reactive.calc
+    def summary_variable_choices():
+        df = loaded_data()
+        if df is None:
+            return []
+        return _build_summary_variable_choices(df, selected_time_column())
+
+    @reactive.calc
+    def selected_summary_columns():
+        choices = summary_variable_choices()
+        return [
+            column
+            for column in _normalize_selection(input.vars_stat_selected())
+            if column in choices
+        ]
+
     @reactive.effect
     @reactive.event(input.upload_data, ignore_init=True)
     def _populate_summary_controls():
@@ -550,7 +574,7 @@ def server_function(input, output, session):
             ui.update_selectize("vars_stat_selected", choices=[], selected=[], session=session)
             return
 
-        choices = _summary_variable_choices(df)
+        choices = summary_variable_choices()
         ui.update_selectize("vars_stat_selected", choices=choices, selected=choices, session=session)
 
     @reactive.calc
@@ -559,11 +583,7 @@ def server_function(input, output, session):
         if df is None:
             return pd.DataFrame({"Statistic": []})
 
-        selected_columns = [
-            column
-            for column in _normalize_selection(input.vars_stat_selected())
-            if column in _summary_variable_choices(df)
-        ]
+        selected_columns = selected_summary_columns()
         if not selected_columns:
             return pd.DataFrame({"Statistic": []})
 
@@ -576,11 +596,11 @@ def server_function(input, output, session):
         if df is None:
             return ui.div("Click Upload data in the Data tab to prepare summary statistics.", class_="alert alert-info py-2")
 
-        choices = _summary_variable_choices(df)
+        choices = summary_variable_choices()
         if not choices:
             return ui.div("No non-time columns are available for summary statistics.", class_="alert alert-warning py-2")
 
-        selected_columns = _normalize_selection(input.vars_stat_selected())
+        selected_columns = selected_summary_columns()
         if not selected_columns:
             return ui.div("Select one or more variables to see summary statistics.", class_="alert alert-info py-2")
 
@@ -627,11 +647,7 @@ def server_function(input, output, session):
         if df is None:
             return _empty_summary_plot("Click Upload data to prepare summary statistics")
 
-        selected_columns = [
-            column
-            for column in _normalize_selection(input.vars_stat_selected())
-            if column in _summary_variable_choices(df)
-        ]
+        selected_columns = selected_summary_columns()
         numeric_columns = [column for column in selected_columns if pd.api.types.is_numeric_dtype(df[column])]
         if not numeric_columns:
             return _empty_summary_plot("Select at least one numeric variable")
@@ -663,6 +679,7 @@ def server_function(input, output, session):
         except TypeError:
             return (value,)
 
+    @reactive.calc
     def _forecast_signature():
         return (
             input.data_source(),
@@ -722,6 +739,7 @@ def server_function(input, output, session):
                 return column
         return numeric_columns[0]
 
+    @reactive.calc
     def _valid_horizon():
         try:
             return max(1, int(input.horizon() or 1))
@@ -757,6 +775,21 @@ def server_function(input, output, session):
             for column in df.columns
             if column != response_column
         ]
+
+    @reactive.calc
+    def selected_response_column():
+        df = loaded_data()
+        if df is None:
+            return None
+        return _preferred_response_column(df)
+
+    @reactive.calc
+    def selected_feature_columns():
+        df = loaded_data()
+        response_column = input.response_variable()
+        if df is None or response_column not in df.columns:
+            return []
+        return _feature_columns(df, response_column)
 
     def _update_forecast_controls(df, response_column=None, select_all_x=False):
         numeric_columns = _numeric_columns(df)
@@ -912,7 +945,7 @@ def server_function(input, output, session):
         return f"{value:,.2f}{suffix}"
 
     def _future_axis_from_time(df, horizon):
-        time_column = input.time_variable()
+        time_column = selected_time_column()
         if time_column not in df.columns:
             actual_axis = np.arange(1, len(df) + 1)
             return actual_axis, np.arange(len(df) + 1, len(df) + horizon + 1), "Sequence"
@@ -947,7 +980,7 @@ def server_function(input, output, session):
         return actual_axis, np.arange(len(df) + 1, len(df) + horizon + 1), "Sequence"
 
     def _time_series_profile(df, response_column=None):
-        time_column = input.time_variable()
+        time_column = selected_time_column()
         profile = {
             "time_column": time_column if time_column in df.columns else None,
             "frequency": None,
@@ -1182,11 +1215,10 @@ def server_function(input, output, session):
             summary = "\n".join(notes) + "\n\n" + summary
         return fitted, future, summary, lower, upper
 
-    def _fit_ets(values, horizon):
+    def _fit_ets(values, horizon, seasonal_period=1):
         from statsmodels.tsa.holtwinters import ExponentialSmoothing
 
         y = np.asarray(values, dtype=float)
-        seasonal_period = int(input.seasonal_period() or 1) if input.seasonal() else 1
         seasonal = "add" if seasonal_period > 1 and len(y) >= seasonal_period * 2 else None
         fit = ExponentialSmoothing(
             y,
@@ -1352,7 +1384,7 @@ def server_function(input, output, session):
         if model_name in {"Naive", "Seasonal Naive", "Moving Average", "Drift"}:
             return (*_fit_baseline_model(values, horizon, model_name, seasonal_period), None)
         if model_name == "ETS":
-            return (*_fit_ets(values, horizon), None)
+            return (*_fit_ets(values, horizon, seasonal_period), None)
         if model_name == "Prophet":
             return (*_fit_prophet(values, horizon, time_index=time_index, frequency=frequency), None)
         if model_name in {"GRNN", "Neural Network", "AutoML"}:
@@ -1873,7 +1905,7 @@ def server_function(input, output, session):
         if df.empty:
             return _as_error("The loaded data is empty.")
 
-        selected_response = _preferred_response_column(df)
+        selected_response = selected_response_column()
         if selected_response is None or selected_response not in df.columns:
             return _as_error("Select a numeric response variable before running a forecast.")
 
@@ -1928,7 +1960,9 @@ def server_function(input, output, session):
         if df is None or df.empty:
             return None
 
-        quality = _data_quality_summary(df)
+        quality = data_quality_summary()
+        if quality is None:
+            return None
         if response_column not in _numeric_columns(df):
             return None
 
@@ -1936,12 +1970,15 @@ def server_function(input, output, session):
             y = pd.to_numeric(df[response_column], errors="coerce").dropna()
             profile = _time_series_profile(df, response_column)
             detected_period = profile.get("detected_period")
+            frequency_label = profile.get("frequency_label", "series")
+            if str(frequency_label).lower() in {"n", "ns", "us", "ms"}:
+                frequency_label = "series"
             if len(y) < 12:
                 models = ["Naive", "Moving Average", "ETS"]
                 reason = "short history"
             elif detected_period:
                 models = ["Seasonal Naive", "SARIMA", "Prophet", "Ensemble"]
-                reason = f"{profile.get('frequency_label', 'series')} data with seasonal signal"
+                reason = f"{frequency_label} data with seasonal signal"
             elif len(y) > 80:
                 models = ["ARIMA", "ETS", "AutoML", "Ensemble"]
                 reason = "enough history to compare multiple models"
@@ -1963,7 +2000,7 @@ def server_function(input, output, session):
                 "metric": "MASE",
                 "details": [
                     ("History", f"{len(y):,} valid observations"),
-                    ("Frequency", profile.get("frequency_label", "sequence")),
+                    ("Frequency", frequency_label),
                     ("Seasonality", detected_period or "Not detected"),
                     ("Trend", profile.get("trend", "flat")),
                     ("Validation", input.ts_validation()),
@@ -2010,31 +2047,45 @@ def server_function(input, output, session):
         suggested = ", ".join(settings["models"])
         note = f" {settings['note']}" if settings.get("note") else ""
         return ui.div(
-            ui.div(
-                ui.tags.i(class_="fa-solid fa-lightbulb"),
-                ui.span(f"Recommended for {settings['response']}: {suggested} ({settings['reason']}).{note}"),
-                class_="recommendation-copy",
-            ),
-            ui.tags.details(
-                ui.tags.summary("Why this recommendation"),
+            ui.card(
                 ui.div(
-                    *(
-                        ui.div(
-                            ui.span(label, class_="recommendation-detail-label"),
-                            ui.span(str(value), class_="recommendation-detail-value"),
-                            class_="recommendation-detail-row",
-                        )
-                        for label, value in settings.get("details", [])
+                    ui.div(
+                        ui.tags.i(class_="fa-solid fa-lightbulb"),
+                        ui.span(" Recommended settings"),
+                        class_="recommendation-heading",
                     ),
-                    class_="recommendation-detail-grid",
+                    ui.p(f"For {settings['response']}: {suggested}", class_="recommendation-copy"),
+                    ui.p(f"{settings['reason'].capitalize()}.{note}", class_="recommendation-note"),
+                    class_="recommendation-content",
                 ),
-                class_="recommendation-details",
+                class_="recommendation-card recommendation-card-main",
             ),
-            ui.input_action_button(
-                "apply_recommendation",
-                "Use recommended settings",
-                icon=ui.tags.i(class_="fa-solid fa-wand-magic-sparkles"),
-                class_="btn-info btn-sm",
+            ui.card(
+                ui.tags.details(
+                    ui.tags.summary("Why this recommendation"),
+                    ui.div(
+                        *(
+                            ui.div(
+                                ui.span(f"{label}: ", class_="recommendation-detail-label"),
+                                ui.span(str(value), class_="recommendation-detail-value"),
+                                class_="recommendation-detail-row",
+                            )
+                            for label, value in settings.get("details", [])
+                        ),
+                        class_="recommendation-detail-grid",
+                    ),
+                    class_="recommendation-details",
+                ),
+                class_="recommendation-card recommendation-card-details",
+            ),
+            ui.div(
+                ui.input_action_button(
+                    "apply_recommendation",
+                    "Use recommended settings",
+                    icon=ui.tags.i(class_="fa-solid fa-wand-magic-sparkles"),
+                    class_="btn-info btn-sm w-100",
+                ),
+                class_="recommendation-action",
             ),
             class_="recommendation-panel",
         )
@@ -2058,6 +2109,7 @@ def server_function(input, output, session):
         ui.update_select("best_model_metric", selected=settings.get("metric", "MASE"), session=session)
         ui.notification_show("Recommended settings applied.", type="message", duration=3)
 
+    @reactive.calc
     def _forecast_is_ready():
         df = loaded_data()
         if df is None or df.empty:
@@ -2067,7 +2119,7 @@ def server_function(input, output, session):
             return False
         if input.data_type() == "Time Series":
             return bool(_normalize_selection(input.model()))
-        return bool(_normalize_selection(input.model1())) and bool(_feature_columns(df, response))
+        return bool(_normalize_selection(input.model1())) and bool(selected_feature_columns())
 
     @output
     @render.ui
@@ -2122,12 +2174,12 @@ def server_function(input, output, session):
             class_="report-preview",
         )
 
-    @reactive.effect
+    @reactive.calc
     @reactive.event(input.forecast, ignore_init=True)
-    def _generate_forecast_from_forecast_tab():
+    def generated_forecast_result():
         if not _forecast_is_ready():
             ui.notification_show("Choose a response variable and at least one model before generating a forecast.", type="warning", duration=4)
-            return
+            return _as_error("Choose a response variable and at least one model before generating a forecast.")
         signature = _forecast_signature()
         ui.notification_show("Forecast run started. Training and comparing selected models...", type="message", duration=3)
         try:
@@ -2139,6 +2191,11 @@ def server_function(input, output, session):
             result = _build_forecast_result()
         if isinstance(result, dict):
             result["signature"] = signature
+        return result
+
+    @reactive.effect
+    def _store_generated_forecast_result():
+        result = generated_forecast_result()
         forecast_result.set(result)
         if result.get("ok"):
             ui.notification_show("Forecast complete.", type="message", duration=3)
@@ -2308,25 +2365,23 @@ def server_function(input, output, session):
         fig.update_yaxes(title=result["response_column"])
         return fig
 
+    @reactive.calc
+    def selected_plot_models():
+        try:
+            return _normalize_selection(input.plot_models())
+        except Exception:
+            return None
+
     @output
     @render_widget
     def plot():
-        selected_models = None
-        try:
-            selected_models = _normalize_selection(input.plot_models())
-        except Exception:
-            selected_models = None
-        return _forecast_figure(forecast_result.get(), selected_models)
+        return _forecast_figure(forecast_result.get(), selected_plot_models())
 
     @output
     @render.ui
     def forecast_plot_container():
         result = forecast_result.get()
-        selected_models = None
-        try:
-            selected_models = _normalize_selection(input.plot_models())
-        except Exception:
-            selected_models = None
+        selected_models = selected_plot_models()
 
         if result is None or not result.get("ok"):
             selected_count = 1
@@ -2764,7 +2819,7 @@ def server_function(input, output, session):
         quality_html = ""
         summary_html = ""
         if df is not None:
-            quality = _data_quality_summary(df)
+            quality = _build_data_quality_summary(df, selected_time_column())
             quality_html = (
                 "<h2>Data Quality</h2><table><tr><th>Check</th><th>Count</th><th>Details</th></tr>"
                 + "".join(f"<tr><td>{escape(str(issue))}</td><td>{count:,}</td><td>{escape(str(detail))}</td></tr>" for issue, count, detail in quality["rows"])
