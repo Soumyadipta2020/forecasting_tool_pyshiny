@@ -7,13 +7,23 @@ def _icon(name: str):
 
 CHANGELOGS = [
     (
-        "2026-05-21",
-        [
-            "Modern UI implemented",
-            "Core data upload, visualization, summary statistics, forecasting, and report downloads implemented",
+            "2026-05-21",
+            [
+                "Modern UI implemented",
+                "Core data upload, visualization, summary statistics, forecasting, and report downloads implemented",
             "Added residual diagnostics, anomaly detection, backtesting plots, and forecast explainability",
             "Added stronger forecast metrics including MASE, WAPE, sMAPE, MdAPE, and interval coverage",
             "Added benchmark forecasters, weighted ensembles, and automatic frequency/seasonality profiling",
+            ],
+    ),
+    (
+        "2026-05-23",
+        [
+            "Added Auto ARIMA, Theta, Croston, and real ARCH/GARCH support",
+            "Added Elastic Net, Random Forest, Gradient Boosting, and SVM for tabular forecasting",
+            "Added compact hyperparameter tuning controls",
+            "Added prediction interval quality diagnostics",
+            "Added project metadata and focused modeling tests",
         ],
     ),
 ]
@@ -50,8 +60,9 @@ def about_tab():
                 ui.tags.li("Upload CSV data or use the bundled sample time-series dataset"),
                 ui.tags.li("Review data quality checks for missing values, duplicates, outliers, mixed types, and timeline gaps"),
                 ui.tags.li("Explore summary statistics with histograms, boxplots, and violin plots"),
-                ui.tags.li("Forecast with selected models such as ARIMA, SARIMA, ETS, Prophet, baselines, neural networks, AutoML-style regressors, and ensembles"),
+                ui.tags.li("Forecast with selected models such as Auto ARIMA, SARIMA, ETS, Prophet, Theta, Croston, volatility models, neural networks, AutoML-style regressors, and ensembles"),
                 ui.tags.li("Compare models with holdout or rolling cross-validation metrics"),
+                ui.tags.li("Tune supported models with compact hyperparameter grids"),
                 ui.tags.li("Inspect residual diagnostics, backtesting plots, anomaly markers, and forecast explainability"),
                 ui.tags.li("Download forecast data, summary statistics, and full HTML reports"),
             ),

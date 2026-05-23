@@ -15,9 +15,10 @@ A PyShiny application for time series forecasting using various AI and statistic
 -   Guided workflow from data quality review to summary statistics, forecasting, and report export
 -   Data quality checks for missing values, duplicates, outliers, mixed numeric/text columns, and date gaps
 -   Interactive visualizations and summary statistics
--   Time-series forecasting with baseline, statistical, machine-learning-style, Prophet, and ensemble model options
--   Non-time-series regression/classification-style model comparison
--   Holdout and rolling validation, residual diagnostics, anomaly detection, explainability, and forecast metrics
+-   Time-series forecasting with baseline, statistical, volatility, intermittent-demand, Prophet, and ensemble model options
+-   Non-time-series regression/classification-style model comparison with linear, regularized, tree-based, boosting, and SVM models
+-   Optional compact hyperparameter tuning for supported models
+-   Holdout and rolling validation, residual diagnostics, anomaly detection, explainability, prediction interval quality, and forecast metrics
 -   Downloadable forecast results, summary statistics, and full HTML reports
 
 ## Installation
@@ -47,4 +48,4 @@ The application expects CSV files with at least one time column and one or more 
 
 ## Models
 
-The forecasting workspace includes options such as Naive, Seasonal Naive, Moving Average, Drift, ARIMA, SARIMA, ETS, Prophet, GRNN, ARFIMA, ARCH/GARCH, Neural Network, AutoML-style regressors, State Space ARIMA, and Ensemble. For tabular data, the app includes Linear Regression, GLM, Logistic Regression, LASSO, and Ridge Regression.
+The forecasting workspace includes options such as Naive, Seasonal Naive, Moving Average, Drift, ARIMA, Auto ARIMA, SARIMA, ETS, Prophet, Theta, Croston, GRNN, Neural Network, AutoML-style regressors, State Space ARIMA, ARCH/GARCH, and Ensemble. ARFIMA is explicitly labeled in-app as an ARIMA approximation. For tabular data, the app includes Linear Regression, GLM, Logistic Regression, LASSO, Elastic Net, Ridge Regression, Random Forest, Gradient Boosting, and SVM.

@@ -10,6 +10,11 @@ import pandas as pd
 import plotly.graph_objects as go
 from shiny import reactive, render, ui
 from shinywidgets import output_widget, render_widget
+from server_scripts.helpers.modeling import (
+    classification_metrics,
+    interval_quality_label,
+    regression_metrics,
+)
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -25,10 +30,13 @@ TIME_SERIES_MODEL_CHOICES = [
     "Moving Average",
     "Drift",
     "ARIMA",
+    "Auto ARIMA",
     "SARIMA",
     "ETS",
     "State Space ARIMA",
     "Prophet",
+    "Theta",
+    "Croston",
     "GRNN",
     "ARFIMA",
     "ARCH",
@@ -41,9 +49,20 @@ TABULAR_MODEL_CHOICES = [
     "Linear Regression",
     "GLM",
     "LASSO",
+    "Elastic Net",
     "Ridge Regression",
+    "Random Forest",
+    "Gradient Boosting",
+    "SVM",
     "Logistic Regression",
 ]
+
+MODEL_TRANSPARENCY_NOTES = {
+    "ARFIMA": "ARFIMA is currently exposed as a clearly labeled ARIMA approximation; use it for exploration, not final fractional-integration claims.",
+    "ARCH": "ARCH uses the optional arch package when installed and falls back with a clear error if it is missing.",
+    "GARCH": "GARCH uses the optional arch package when installed and falls back with a clear error if it is missing.",
+    "State Space ARIMA": "State Space ARIMA is fitted with statsmodels SARIMAX in non-seasonal state-space form.",
+}
 
 
 def _plotly_dark_layout(fig, title=None):
@@ -700,6 +719,8 @@ def server_function(input, output, session):
             int(input.rolling_folds() or 0),
             int(input.rolling_initial_pct() or 0),
             input.best_model_metric(),
+            bool(input.tune_hyperparameters()),
+            int(input.tuning_cv_folds() or 0),
             bool(input.use_backtesting()),
             input.tabular_split_mode(),
             int(input.train_split() or 0),
@@ -852,92 +873,10 @@ def server_function(input, output, session):
         return {"ok": False, "message": message}
 
     def _regression_metrics(actual, predicted, k=2, training_series=None, lower=None, upper=None):
-        actual = np.asarray(actual, dtype=float)
-        predicted = np.asarray(predicted, dtype=float)
-        mask = np.isfinite(actual) & np.isfinite(predicted)
-        if not mask.any():
-            return {
-                "MAE": np.nan,
-                "RMSE": np.nan,
-                "MAPE": np.nan,
-                "sMAPE": np.nan,
-                "MASE": np.nan,
-                "WAPE": np.nan,
-                "MdAPE": np.nan,
-                "R2": np.nan,
-                "BIC": np.nan,
-                "Coverage": np.nan,
-                "Avg Width": np.nan,
-            }
-
-        actual = actual[mask]
-        predicted = predicted[mask]
-        errors = actual - predicted
-        mae = float(np.mean(np.abs(errors)))
-        ssr = float(np.sum(errors**2))
-        n = len(actual)
-        rmse = float(np.sqrt(ssr / n))
-        nonzero = actual != 0
-        mape = float(np.mean(np.abs(errors[nonzero] / actual[nonzero])) * 100) if nonzero.any() else np.nan
-        mdape = float(np.median(np.abs(errors[nonzero] / actual[nonzero])) * 100) if nonzero.any() else np.nan
-        smape_denominator = np.abs(actual) + np.abs(predicted)
-        smape_mask = smape_denominator != 0
-        smape = float(np.mean(2 * np.abs(errors[smape_mask]) / smape_denominator[smape_mask]) * 100) if smape_mask.any() else np.nan
-        actual_sum = float(np.sum(np.abs(actual)))
-        wape = float(np.sum(np.abs(errors)) / actual_sum * 100) if actual_sum else np.nan
-
-        scale_source = np.asarray(training_series if training_series is not None else actual, dtype=float)
-        scale_source = scale_source[np.isfinite(scale_source)]
-        naive_scale = float(np.mean(np.abs(np.diff(scale_source)))) if len(scale_source) > 1 else np.nan
-        mase = float(mae / naive_scale) if np.isfinite(naive_scale) and naive_scale != 0 else np.nan
-
-        total = float(np.sum((actual - np.mean(actual)) ** 2))
-        r2 = float(1 - ssr / total) if total else np.nan
-        
-        # Calculate pseudo-BIC
-        if ssr > 0 and n > 0:
-            bic = float(n * np.log(ssr / n) + k * np.log(n))
-        else:
-            bic = np.nan
-
-        coverage = np.nan
-        avg_width = np.nan
-        if lower is not None and upper is not None:
-            lower = np.asarray(lower, dtype=float)
-            upper = np.asarray(upper, dtype=float)
-            interval_mask = mask.copy()
-            if len(lower) == len(mask) and len(upper) == len(mask):
-                lower = lower[interval_mask]
-                upper = upper[interval_mask]
-            elif len(lower) != len(actual) or len(upper) != len(actual):
-                lower = upper = np.asarray([], dtype=float)
-            if len(lower) == len(actual) and len(upper) == len(actual):
-                interval_valid = np.isfinite(lower) & np.isfinite(upper)
-                if interval_valid.any():
-                    coverage = float(np.mean((actual[interval_valid] >= lower[interval_valid]) & (actual[interval_valid] <= upper[interval_valid])) * 100)
-                    avg_width = float(np.mean(upper[interval_valid] - lower[interval_valid]))
-
-        return {
-            "MAE": mae,
-            "RMSE": rmse,
-            "MAPE": mape,
-            "sMAPE": smape,
-            "MASE": mase,
-            "WAPE": wape,
-            "MdAPE": mdape,
-            "R2": r2,
-            "BIC": bic,
-            "Coverage": coverage,
-            "Avg Width": avg_width,
-        }
+        return regression_metrics(actual, predicted, k=k, training_series=training_series, lower=lower, upper=upper)
 
     def _classification_metrics(actual, predicted):
-        actual = np.asarray(actual)
-        predicted = np.asarray(predicted)
-        mask = pd.notna(actual) & pd.notna(predicted)
-        if not mask.any():
-            return {"Accuracy": np.nan}
-        return {"Accuracy": float(np.mean(actual[mask] == predicted[mask]) * 100)}
+        return classification_metrics(actual, predicted)
 
     def _format_metric(value, suffix=""):
         if value is None or pd.isna(value):
@@ -1176,30 +1115,47 @@ def server_function(input, output, session):
                 enforce_invertibility=False,
             ).fit(disp=False)
         else:
-            candidate_orders = [
-                (1, 1, 1),
-                (1, 0, 1),
-                (2, 1, 1),
-                (1, 1, 2),
-                (0, 1, 1),
-                (1, 1, 0),
-                (0, 0, 0),
-            ]
+            if model_name == "Auto ARIMA" or input.tune_hyperparameters():
+                max_pq = 3 if len(y) >= 36 else 2
+                candidate_orders = [(p, d, q) for d in (0, 1) for p in range(max_pq + 1) for q in range(max_pq + 1) if (p, d, q) != (0, 0, 0)]
+                notes.append("ARIMA order selected by AIC search.")
+            else:
+                candidate_orders = [
+                    (1, 1, 1),
+                    (1, 0, 1),
+                    (2, 1, 1),
+                    (1, 1, 2),
+                    (0, 1, 1),
+                    (1, 1, 0),
+                    (0, 0, 0),
+                ]
             best_fit = None
             best_aic = np.inf
+            best_order = None
             for order in candidate_orders:
                 try:
-                    candidate = ARIMA(y, order=order).fit()
+                    if model_name == "State Space ARIMA":
+                        candidate = SARIMAX(
+                            y,
+                            order=order,
+                            enforce_stationarity=False,
+                            enforce_invertibility=False,
+                        ).fit(disp=False)
+                    else:
+                        candidate = ARIMA(y, order=order).fit()
                     if candidate.aic < best_aic:
                         best_fit = candidate
                         best_aic = candidate.aic
+                        best_order = order
                 except Exception:
                     continue
             if best_fit is None:
                 raise RuntimeError("Unable to fit an ARIMA model to the selected response variable.")
             fit = best_fit
-            if model_name in {"ARFIMA", "State Space ARIMA", "ARCH", "GARCH"}:
-                notes.append(f"{model_name} is approximated with an ARIMA mean model in this PyShiny build.")
+            if best_order is not None:
+                notes.append(f"Selected order: {best_order}")
+            if model_name == "ARFIMA":
+                notes.append("ARFIMA is shown as an ARIMA approximation in this build; fractional differencing is not claimed.")
 
         fitted = np.asarray(fit.fittedvalues, dtype=float)
         forecast_obj = fit.get_forecast(steps=horizon)
@@ -1214,6 +1170,58 @@ def server_function(input, output, session):
         if notes:
             summary = "\n".join(notes) + "\n\n" + summary
         return fitted, future, summary, lower, upper
+
+    def _fit_volatility_model(values, horizon, model_name):
+        try:
+            from arch import arch_model
+        except ImportError as exc:
+            raise RuntimeError("Install the optional 'arch' package to run ARCH/GARCH models.") from exc
+
+        y = np.asarray(values, dtype=float)
+        vol = "ARCH" if model_name == "ARCH" else "GARCH"
+        p = 1
+        q = 0 if model_name == "ARCH" else 1
+        fit = arch_model(y, mean="AR", lags=1, vol=vol, p=p, q=q, rescale=False).fit(disp="off")
+        fitted = np.asarray(fit.params.get("Const", 0.0) + np.r_[np.nan, fit.params.get("y[1]", 0.0) * y[:-1]], dtype=float)
+        forecast = fit.forecast(horizon=horizon, reindex=False)
+        future = np.asarray(forecast.mean.iloc[-1].to_numpy(), dtype=float)
+        variance = np.asarray(forecast.variance.iloc[-1].to_numpy(), dtype=float)
+        radius = 1.96 * np.sqrt(np.maximum(variance, 0))
+        summary = f"Model: {model_name}\nEngine: arch.arch_model\nVolatility: {vol}({p}, {q})\n{fit.summary()}"
+        return fitted, future, summary, future - radius, future + radius
+
+    def _fit_theta(values, horizon, seasonal_period=1):
+        try:
+            from statsmodels.tsa.forecasting.theta import ThetaModel
+        except ImportError as exc:
+            raise RuntimeError("Theta requires a statsmodels version with ThetaModel support.") from exc
+
+        y = pd.Series(np.asarray(values, dtype=float))
+        period = max(2, int(seasonal_period or 2))
+        if len(y) <= period * 2:
+            period = 2
+        fit = ThetaModel(y, period=period).fit()
+        fitted = np.asarray(fit.fittedvalues, dtype=float)
+        future = np.asarray(fit.forecast(horizon), dtype=float)
+        return fitted, future, f"Model: Theta\nEngine: statsmodels ThetaModel\nPeriod: {period}", None, None
+
+    def _fit_croston(values, horizon, alpha=0.1):
+        y = np.asarray(values, dtype=float)
+        demand = None
+        interval = None
+        last_event = 0
+        fitted = np.full(len(y), np.nan)
+        for idx, value in enumerate(y):
+            if demand is not None and interval not in (None, 0):
+                fitted[idx] = demand / interval
+            if value > 0:
+                gap = idx - last_event if last_event else 1
+                demand = value if demand is None else alpha * value + (1 - alpha) * demand
+                interval = gap if interval is None else alpha * gap + (1 - alpha) * interval
+                last_event = idx
+        forecast_value = 0.0 if demand is None or interval in (None, 0) else demand / interval
+        future = np.repeat(forecast_value, horizon).astype(float)
+        return fitted, future, f"Model: Croston\nAlpha: {alpha}\nBest for intermittent non-negative demand.", None, None
 
     def _fit_ets(values, horizon, seasonal_period=1):
         from statsmodels.tsa.holtwinters import ExponentialSmoothing
@@ -1387,6 +1395,12 @@ def server_function(input, output, session):
             return (*_fit_ets(values, horizon, seasonal_period), None)
         if model_name == "Prophet":
             return (*_fit_prophet(values, horizon, time_index=time_index, frequency=frequency), None)
+        if model_name == "Theta":
+            return (*_fit_theta(values, horizon, seasonal_period), None)
+        if model_name == "Croston":
+            return (*_fit_croston(values, horizon), None)
+        if model_name in {"ARCH", "GARCH"}:
+            return (*_fit_volatility_model(values, horizon, model_name), None)
         if model_name in {"GRNN", "Neural Network", "AutoML"}:
             fitted, future, summary, lower, upper, importance = _fit_lagged_regressor(values, horizon, model_name, seasonal_period)
             return fitted, future, summary, lower, upper, importance
@@ -1399,7 +1413,7 @@ def server_function(input, output, session):
             return default
 
     def _higher_is_better(metric):
-        return metric in {"R2", "Accuracy", "Coverage"}
+        return metric in {"R2", "Accuracy", "Coverage", "F1", "Precision", "Recall"}
 
     def _metric_is_better(score, best_score, metric):
         if pd.isna(score):
@@ -1680,6 +1694,7 @@ def server_function(input, output, session):
             "validation_method": input.ts_validation(),
             "test_periods": _read_positive_int(input.ts_test_periods(), _valid_horizon()),
             "scenario_adjustment": scenario_adj,
+            "tuning_enabled": bool(input.tune_hyperparameters()),
             "profile": profile,
             "anomalies": _detect_anomalies(y, actual_axis),
             "failed_models": failed_models,
@@ -1709,10 +1724,12 @@ def server_function(input, output, session):
         return "\n".join(rows)
 
     def _run_tabular_forecast(df, response_column):
-        from sklearn.linear_model import Lasso, LinearRegression, LogisticRegression, Ridge
+        from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
+        from sklearn.linear_model import ElasticNet, Lasso, LinearRegression, LogisticRegression, Ridge
+        from sklearn.model_selection import GridSearchCV, KFold, train_test_split
         from sklearn.pipeline import make_pipeline
+        from sklearn.svm import SVR
         from sklearn.preprocessing import StandardScaler
-        from sklearn.model_selection import train_test_split
         import statsmodels.api as sm
 
         model_names = input.model1()
@@ -1759,6 +1776,25 @@ def server_function(input, output, session):
         x_train = x_frame.iloc[idx_train]
         x_test = x_frame.iloc[idx_test]
 
+        def _fit_estimator(estimator, param_grid, x_tr, y_tr, scoring="neg_root_mean_squared_error"):
+            if not input.tune_hyperparameters() or not param_grid or len(x_tr) < 6:
+                estimator.fit(x_tr, y_tr)
+                return estimator, {}
+            folds = min(_read_positive_int(input.tuning_cv_folds(), 3, minimum=2), max(2, len(x_tr) // 2))
+            try:
+                search = GridSearchCV(
+                    estimator,
+                    param_grid=param_grid,
+                    scoring=scoring,
+                    cv=KFold(n_splits=folds, shuffle=True, random_state=42),
+                    n_jobs=None,
+                )
+                search.fit(x_tr, y_tr)
+                return search.best_estimator_, search.best_params_
+            except Exception:
+                estimator.fit(x_tr, y_tr)
+                return estimator, {}
+
         models_dict = {}
         failed_models = {}
         metric_kind = "regression"
@@ -1767,11 +1803,18 @@ def server_function(input, output, session):
                 if model_name == "Logistic Regression" and y_raw.loc[keep_rows].nunique(dropna=True) <= 20:
                     y = y_raw.loc[keep_rows].reset_index(drop=True)
                     y_tr, y_te = y.iloc[idx_train], y.iloc[idx_test]
-                    model = make_pipeline(StandardScaler(), LogisticRegression(max_iter=1000))
-                    model.fit(x_train, y_tr)
+                    model, best_params = _fit_estimator(
+                        make_pipeline(StandardScaler(), LogisticRegression(max_iter=1000)),
+                        {"logisticregression__C": [0.2, 1.0, 5.0]},
+                        x_train,
+                        y_tr,
+                        scoring="accuracy",
+                    )
                     fitted_full = model.predict(x_frame)
                     metrics = _classification_metrics(y_te, model.predict(x_test))
                     summary = _sklearn_regression_summary(model_name, model, x_frame.columns.tolist())
+                    if best_params:
+                        summary += "\nBest tuned parameters: " + str(best_params)
                     metric_kind = "classification"
                     
                     estimator = model.steps[-1][1]
@@ -1797,19 +1840,83 @@ def server_function(input, output, session):
                         else:
                             importance = {"features": list(x_frame.columns), "importance": model.params.tolist()}
                     elif model_name == "LASSO":
-                        model = make_pipeline(StandardScaler(), Lasso(alpha=0.01, max_iter=10000))
-                        model.fit(x_train, y_tr)
+                        model, best_params = _fit_estimator(
+                            make_pipeline(StandardScaler(), Lasso(alpha=0.01, max_iter=10000)),
+                            {"lasso__alpha": [0.001, 0.01, 0.1, 1.0]},
+                            x_train,
+                            y_tr,
+                        )
                         fitted_full = model.predict(x_frame)
                         metrics = _regression_metrics(y_te, model.predict(x_test))
                         summary = _sklearn_regression_summary(model_name, model, x_frame.columns.tolist())
+                        if best_params:
+                            summary += "\nBest tuned parameters: " + str(best_params)
+                        importance = {"features": x_frame.columns.tolist(), "importance": model.steps[-1][1].coef_.tolist()}
+                    elif model_name == "Elastic Net":
+                        model, best_params = _fit_estimator(
+                            make_pipeline(StandardScaler(), ElasticNet(alpha=0.01, l1_ratio=0.5, max_iter=10000)),
+                            {"elasticnet__alpha": [0.001, 0.01, 0.1, 1.0], "elasticnet__l1_ratio": [0.2, 0.5, 0.8]},
+                            x_train,
+                            y_tr,
+                        )
+                        fitted_full = model.predict(x_frame)
+                        metrics = _regression_metrics(y_te, model.predict(x_test))
+                        summary = _sklearn_regression_summary(model_name, model, x_frame.columns.tolist())
+                        if best_params:
+                            summary += "\nBest tuned parameters: " + str(best_params)
                         importance = {"features": x_frame.columns.tolist(), "importance": model.steps[-1][1].coef_.tolist()}
                     elif model_name == "Ridge Regression":
-                        model = make_pipeline(StandardScaler(), Ridge(alpha=1.0))
-                        model.fit(x_train, y_tr)
+                        model, best_params = _fit_estimator(
+                            make_pipeline(StandardScaler(), Ridge(alpha=1.0)),
+                            {"ridge__alpha": [0.1, 1.0, 10.0, 50.0]},
+                            x_train,
+                            y_tr,
+                        )
                         fitted_full = model.predict(x_frame)
                         metrics = _regression_metrics(y_te, model.predict(x_test))
                         summary = _sklearn_regression_summary(model_name, model, x_frame.columns.tolist())
+                        if best_params:
+                            summary += "\nBest tuned parameters: " + str(best_params)
                         importance = {"features": x_frame.columns.tolist(), "importance": model.steps[-1][1].coef_.tolist()}
+                    elif model_name == "Random Forest":
+                        model, best_params = _fit_estimator(
+                            RandomForestRegressor(n_estimators=250, random_state=42, min_samples_leaf=2),
+                            {"n_estimators": [150, 300], "max_depth": [None, 6, 12], "min_samples_leaf": [1, 3]},
+                            x_train,
+                            y_tr,
+                        )
+                        fitted_full = model.predict(x_frame)
+                        metrics = _regression_metrics(y_te, model.predict(x_test))
+                        summary = _sklearn_regression_summary(model_name, model, x_frame.columns.tolist())
+                        if best_params:
+                            summary += "\nBest tuned parameters: " + str(best_params)
+                        importance = {"features": x_frame.columns.tolist(), "importance": model.feature_importances_.tolist()}
+                    elif model_name == "Gradient Boosting":
+                        model, best_params = _fit_estimator(
+                            GradientBoostingRegressor(random_state=42),
+                            {"n_estimators": [100, 200], "learning_rate": [0.03, 0.08, 0.15], "max_depth": [2, 3]},
+                            x_train,
+                            y_tr,
+                        )
+                        fitted_full = model.predict(x_frame)
+                        metrics = _regression_metrics(y_te, model.predict(x_test))
+                        summary = _sklearn_regression_summary(model_name, model, x_frame.columns.tolist())
+                        if best_params:
+                            summary += "\nBest tuned parameters: " + str(best_params)
+                        importance = {"features": x_frame.columns.tolist(), "importance": model.feature_importances_.tolist()}
+                    elif model_name == "SVM":
+                        model, best_params = _fit_estimator(
+                            make_pipeline(StandardScaler(), SVR(C=1.0, epsilon=0.1)),
+                            {"svr__C": [0.3, 1.0, 3.0], "svr__epsilon": [0.05, 0.1, 0.2]},
+                            x_train,
+                            y_tr,
+                        )
+                        fitted_full = model.predict(x_frame)
+                        metrics = _regression_metrics(y_te, model.predict(x_test))
+                        summary = _sklearn_regression_summary(model_name, model, x_frame.columns.tolist())
+                        if best_params:
+                            summary += "\nBest tuned parameters: " + str(best_params)
+                        importance = None
                     else:
                         model = LinearRegression()
                         model.fit(x_train, y_tr)
@@ -1895,6 +2002,7 @@ def server_function(input, output, session):
             "scenario_feature": scenario_feature if scenario_predictions else None,
             "scenario_value": scenario_value if scenario_predictions else None,
             "scenario_predictions": scenario_predictions,
+            "tuning_enabled": bool(input.tune_hyperparameters()),
             "failed_models": failed_models,
         }
 
@@ -1974,13 +2082,13 @@ def server_function(input, output, session):
             if str(frequency_label).lower() in {"n", "ns", "us", "ms"}:
                 frequency_label = "series"
             if len(y) < 12:
-                models = ["Naive", "Moving Average", "ETS"]
+                models = ["Naive", "Moving Average", "Theta"]
                 reason = "short history"
             elif detected_period:
-                models = ["Seasonal Naive", "SARIMA", "Prophet", "Ensemble"]
+                models = ["Seasonal Naive", "SARIMA", "Prophet", "Theta", "Ensemble"]
                 reason = f"{frequency_label} data with seasonal signal"
             elif len(y) > 80:
-                models = ["ARIMA", "ETS", "AutoML", "Ensemble"]
+                models = ["Auto ARIMA", "ETS", "AutoML", "Theta", "Ensemble"]
                 reason = "enough history to compare multiple models"
             else:
                 models = ["Naive", "Drift", "ARIMA", "ETS"]
@@ -2009,13 +2117,13 @@ def server_function(input, output, session):
 
         feature_cols = _feature_columns(df, response_column)
         if len(feature_cols) > len(df) / 2:
-            models = ["LASSO", "Ridge Regression"]
+            models = ["LASSO", "Elastic Net", "Ridge Regression"]
             reason = "many predictors relative to rows"
         elif len(feature_cols) <= 2:
-            models = ["Linear Regression", "GLM"]
+            models = ["Linear Regression", "GLM", "SVM"]
             reason = "small feature set"
         else:
-            models = ["Linear Regression", "Ridge Regression", "LASSO"]
+            models = ["Random Forest", "Gradient Boosting", "Ridge Regression", "Elastic Net"]
             reason = "balanced feature and row count"
         caution = " Address missing or mixed-type columns first." if quality["non_numeric"] or quality["rows"][0][1] else ""
         return {
@@ -2088,6 +2196,19 @@ def server_function(input, output, session):
                 class_="recommendation-action",
             ),
             class_="recommendation-panel",
+        )
+
+    @output
+    @render.ui
+    def model_transparency_note():
+        selected = _normalize_selection(input.model()) if input.data_type() == "Time Series" else _normalize_selection(input.model1())
+        notes = [MODEL_TRANSPARENCY_NOTES[name] for name in selected if name in MODEL_TRANSPARENCY_NOTES]
+        if not notes:
+            return ui.div()
+        return ui.div(
+            ui.div(ui.tags.i(class_="fa-solid fa-circle-info"), " Model transparency", class_="recommendation-heading"),
+            ui.tags.ul(*(ui.tags.li(note) for note in notes), class_="tick-list mb-0"),
+            class_="alert alert-info py-2",
         )
 
     @reactive.effect
@@ -2445,7 +2566,7 @@ def server_function(input, output, session):
         best_model = result.get("best_model", "")
         best_metric = input.best_model_metric()
         
-        metric_keys = ["MASE", "WAPE", "sMAPE", "MAPE", "RMSE", "MAE", "R2", "BIC", "Coverage"] if result.get("metric_kind") != "classification" else ["Accuracy"]
+        metric_keys = ["MASE", "WAPE", "sMAPE", "MAPE", "RMSE", "MAE", "R2", "BIC", "Coverage", "Avg Width", "Width/Mean"] if result.get("metric_kind") != "classification" else ["Accuracy", "F1", "Precision", "Recall"]
         
         table_html = "<div class='table-responsive mt-2 mb-4'><table class='table table-hover table-borderless align-middle' style='border: 1px solid var(--ops-border); border-radius: 8px; overflow: hidden; background: var(--ops-panel-deep);'><thead style='background: rgba(255,255,255,0.03);'><tr><th style='padding: 12px 16px;'>Model</th>"
         for k in metric_keys:
@@ -2460,7 +2581,7 @@ def server_function(input, output, session):
             for k in metric_keys:
                 val = m_data["metrics"].get(k, np.nan)
                 text_color = "color: #fff;" if is_best else "color: #dbeafe;"
-                suffix = "%" if k in ["MAPE", "sMAPE", "WAPE", "MdAPE", "Coverage", "Accuracy"] else ""
+                suffix = "%" if k in ["MAPE", "sMAPE", "WAPE", "MdAPE", "Coverage", "Width/Mean", "Accuracy", "F1", "Precision", "Recall"] else ""
                 table_html += f"<td style='padding: 12px 16px; {text_color}'>{_format_metric(val, suffix)}</td>"
             table_html += "</tr>"
         table_html += "</tbody></table></div>"
@@ -2471,7 +2592,12 @@ def server_function(input, output, session):
             metrics = result.get("metrics", {})
             
         if result.get("metric_kind") == "classification":
-            cards = [("Accuracy", _format_metric(metrics.get("Accuracy"), "%"), "bullseye", "primary")]
+            cards = [
+                ("Accuracy", _format_metric(metrics.get("Accuracy"), "%"), "bullseye", "primary"),
+                ("F1", _format_metric(metrics.get("F1"), "%"), "scale-balanced", "success"),
+                ("Precision", _format_metric(metrics.get("Precision"), "%"), "crosshairs", "info"),
+                ("Recall", _format_metric(metrics.get("Recall"), "%"), "rotate-left", "warning"),
+            ]
         else:
             cards = [
                 ("MASE", _format_metric(metrics.get("MASE")), "scale-balanced", "primary"),
@@ -2501,6 +2627,41 @@ def server_function(input, output, session):
                 ),
                 class_="metric-grid mt-2",
             )
+        )
+
+    @output
+    @render.ui
+    def interval_quality_report():
+        result = forecast_result.get()
+        if result is None or not result.get("ok") or result.get("kind") != "Time Series":
+            return ui.div("Generate a time-series forecast to validate prediction interval coverage.", class_="alert alert-info py-2")
+        best_model = result.get("best_model")
+        model_data = result.get("models", {}).get(best_model, {})
+        metrics = model_data.get("metrics", {})
+        title, detail, color = interval_quality_label(metrics)
+        cards = [
+            ("Coverage", _format_metric(metrics.get("Coverage"), "%"), "umbrella", "primary"),
+            ("Avg Width", _format_metric(metrics.get("Avg Width")), "arrows-left-right", "success"),
+            ("Width/Mean", _format_metric(metrics.get("Width/Mean"), "%"), "ruler-horizontal", "warning"),
+        ]
+        return ui.div(
+            ui.div(
+                ui.div(ui.tags.i(class_=f"fa-solid fa-circle-{ 'check' if color == 'success' else 'exclamation' }"), title, class_=f"quality-status {'is-clean' if color == 'success' else ''}"),
+                ui.div(f"{best_model}: {detail}", class_="quality-status-copy"),
+                class_="quality-recommendations compact",
+            ),
+            ui.div(
+                *(
+                    ui.div(
+                        ui.div(ui.tags.i(class_=f"fa-solid fa-{icon}"), class_="metric-icon"),
+                        ui.div(value, class_="metric-value"),
+                        ui.div(label, class_="metric-label"),
+                        class_=f"metric-card border-{border}",
+                    )
+                    for label, value, icon, border in cards
+                ),
+                class_="metric-grid mt-2 mb-3",
+            ),
         )
 
     @output
@@ -2806,13 +2967,13 @@ def server_function(input, output, session):
 
         df = loaded_data()
         models_dict = result.get("models", {})
-        metric_keys = ["MASE", "WAPE", "sMAPE", "MAPE", "RMSE", "MAE", "R2", "BIC", "Coverage"] if result.get("metric_kind") != "classification" else ["Accuracy"]
+        metric_keys = ["MASE", "WAPE", "sMAPE", "MAPE", "RMSE", "MAE", "R2", "BIC", "Coverage", "Avg Width", "Width/Mean"] if result.get("metric_kind") != "classification" else ["Accuracy", "F1", "Precision", "Recall"]
         metric_rows = []
         for m_name, m_data in models_dict.items():
             metric_rows.append(
                 "<tr>"
                 f"<td>{escape(str(m_name))}</td>"
-                + "".join(f"<td>{escape(_format_metric(m_data['metrics'].get(k, np.nan), '%' if k in ['MAPE', 'sMAPE', 'WAPE', 'MdAPE', 'Coverage', 'Accuracy'] else ''))}</td>" for k in metric_keys)
+                + "".join(f"<td>{escape(_format_metric(m_data['metrics'].get(k, np.nan), '%' if k in ['MAPE', 'sMAPE', 'WAPE', 'MdAPE', 'Coverage', 'Width/Mean', 'Accuracy', 'F1', 'Precision', 'Recall'] else ''))}</td>" for k in metric_keys)
                 + "</tr>"
             )
 
@@ -2854,6 +3015,7 @@ def server_function(input, output, session):
             )
 
         diagnostics_html = ""
+        interval_html = ""
         if result.get("kind") == "Time Series":
             best = result.get("best_model")
             diagnostics = models_dict.get(best, {}).get("diagnostics", {}) if best in models_dict else {}
@@ -2871,6 +3033,20 @@ def server_function(input, output, session):
                     }
                 )
                 diagnostics_html = "<h2>Residual Diagnostics</h2>" + diagnostics_df.to_html(index=False)
+            interval_metrics = models_dict.get(best, {}).get("metrics", {}) if best in models_dict else {}
+            title, detail, _ = interval_quality_label(interval_metrics)
+            interval_df = pd.DataFrame(
+                {
+                    "Metric": ["Coverage", "Average Width", "Width / Mean Actual", "Verdict"],
+                    "Value": [
+                        _format_metric(interval_metrics.get("Coverage"), "%"),
+                        _format_metric(interval_metrics.get("Avg Width")),
+                        _format_metric(interval_metrics.get("Width/Mean"), "%"),
+                        f"{title}: {detail}",
+                    ],
+                }
+            )
+            interval_html = "<h2>Prediction Interval Quality</h2>" + interval_df.to_html(index=False)
 
         anomaly_html = ""
         if result.get("kind") == "Time Series" and result.get("anomalies") is not None:
@@ -2892,6 +3068,7 @@ def server_function(input, output, session):
             ("Validation", result.get("validation_method", "")),
             ("Test periods", result.get("test_periods", "")),
             ("Train split", result.get("train_split", "")),
+            ("Hyperparameter tuning", "Enabled" if result.get("tuning_enabled") else "Disabled"),
             ("Scenario adjustment", result.get("scenario_adjustment", "")),
             ("Detected frequency", result.get("profile", {}).get("frequency_label", "")),
             ("Detected seasonal period", result.get("profile", {}).get("detected_period", "")),
@@ -2917,6 +3094,7 @@ def server_function(input, output, session):
             <div class="section"><h2>Forecast Chart</h2>{chart_html}</div>
             <div class="section"><h2>Model Comparison</h2><table><tr><th>Model</th>{''.join(f'<th>{escape(k)}</th>' for k in metric_keys)}</tr>{''.join(metric_rows)}</table></div>
             <div class="section">{diagnostics_html}</div>
+            <div class="section">{interval_html}</div>
             <div class="section">{anomaly_html}</div>
             <div class="section">{quality_html}</div>
             <div class="section">{summary_html}</div>
