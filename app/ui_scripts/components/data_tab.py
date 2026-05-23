@@ -13,6 +13,10 @@ def data_tab():
             ui.layout_columns(
                 ui.card(
                     ui.card_header(_icon("database"), " Data Source"),
+                    ui.div(
+                        ui.div("CSV should include one time column and at least one numeric value column.", class_="data-format-copy"),
+                        class_="data-format-note",
+                    ),
                     ui.input_select(
                         "data_source",
                         "Select Data Source",
@@ -37,29 +41,10 @@ def data_tab():
                             choices=["timeseries demo"],
                             selected="timeseries demo",
                         ),
-                        ui.input_action_button(
-                            "load_data",
-                            "Load Data",
-                            icon=_icon("cloud-arrow-up"),
-                            class_="btn-primary w-100",
-                        ),
+                        ui.div("Sample data loads when selected.", class_="data-format-copy"),
                     ),
                     ui.input_select("time_variable", "Select Time Variable", choices=[]),
-                    ui.div(
-                        ui.download_button(
-                            "file_template_download",
-                            "Download template file",
-                            icon=_icon("download"),
-                            class_="btn-info w-100",
-                        ),
-                        ui.input_action_button(
-                            "upload_data",
-                            "Upload data",
-                            icon=_icon("upload"),
-                            class_="btn-primary w-100",
-                        ),
-                        class_="button-column",
-                    ),
+                    ui.output_ui("data_action_controls"),
                     class_="data-source-card",
                 ),
                 ui.div(

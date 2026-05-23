@@ -1,5 +1,6 @@
 from shiny import ui
 
+
 def nav_panel(title, *children, **kwargs):
     """Wrapper for ui.nav_panel to centralize future behaviour or styling."""
     return ui.nav_panel(title, *children, **kwargs)

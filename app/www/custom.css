@@ -435,6 +435,103 @@ label,
   margin-top: 1rem;
 }
 
+.btn:disabled,
+.btn.disabled,
+.shiny-download-link.disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+  pointer-events: none;
+}
+
+.data-format-note {
+  margin-bottom: 0.8rem;
+  padding: 0.72rem 0.8rem;
+  border: 1px solid rgba(6, 182, 240, 0.28);
+  border-radius: 8px;
+  background: rgba(6, 182, 240, 0.08);
+}
+
+.data-format-copy,
+.next-step-copy {
+  margin: 0;
+  color: var(--ops-muted);
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.summary-next-actions {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.recommendation-panel {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0.2rem 0 0.95rem;
+  padding: 0.8rem;
+  border: 1px solid rgba(6, 182, 240, 0.34);
+  border-radius: 8px;
+  background: rgba(6, 182, 240, 0.1);
+  color: #b9efff;
+}
+
+.recommendation-copy {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  font-size: 0.85rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.recommendation-copy .fa-solid {
+  margin-top: 0.12rem;
+  color: var(--ops-cyan);
+}
+
+.advanced-forecast-settings {
+  margin-top: 0.3rem;
+  border: 1px solid #45566e;
+  border-radius: 8px;
+  background: var(--ops-panel-deep);
+}
+
+.advanced-forecast-settings summary {
+  display: inline-flex;
+  min-height: 46px;
+  cursor: pointer;
+  list-style: none;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.75rem 0.9rem;
+  color: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 950;
+  letter-spacing: 0.15px;
+  text-transform: uppercase;
+}
+
+.advanced-forecast-settings summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced-forecast-settings summary .fa-solid {
+  margin-left: 0.35rem;
+  color: var(--ops-blue);
+  transition: transform 0.16s ease;
+}
+
+.advanced-forecast-settings[open] summary .fa-solid {
+  transform: rotate(180deg);
+}
+
+.advanced-settings-body {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.35rem 0.9rem 0.9rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
+
 .alert {
   border-width: 1px;
   border-radius: 8px;

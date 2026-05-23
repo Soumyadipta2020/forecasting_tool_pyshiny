@@ -64,20 +64,14 @@ def _empty_plotly_figure(message):
 
 def server_function(input, output, session):
     @reactive.calc
-    @reactive.event(input.file, input.load_data, ignore_init=False)
     def loaded_data():
-        if input.load_data() == 0 and not input.file():
-            return None
-
         try:
             if input.data_source() == "Upload":
                 file_info = input.file()
                 if not file_info:
-                    ui.notification_show("Please choose a CSV file before loading data.", type="error", duration=4)
                     return None
                 return pd.read_csv(file_info[0]["datapath"])
-            else:
-                return pd.read_csv(SAMPLE_FILE)
+            return pd.read_csv(SAMPLE_FILE)
         except Exception as exc:
             ui.notification_show(f"Could not load data: {exc}", type="error", duration=4)
             return None
@@ -339,9 +333,35 @@ def server_function(input, output, session):
     def file_template_download():
         yield pd.read_csv(SAMPLE_FILE).to_csv(index=False)
 
+    @output
+    @render.ui
+    def data_action_controls():
+        df = loaded_data()
+        ready = df is not None and not df.empty and bool(df.select_dtypes(include="number").columns.tolist())
+        return ui.div(
+            ui.download_button(
+                "file_template_download",
+                "Download CSV template",
+                icon=ui.tags.i(class_="fa-solid fa-download"),
+                class_="btn-info w-100",
+            ),
+            ui.input_action_button(
+                "upload_data",
+                "Continue to summary",
+                icon=ui.tags.i(class_="fa-solid fa-arrow-right"),
+                class_="btn-primary w-100",
+                disabled=not ready,
+            ),
+            class_="button-column",
+        )
+
     @reactive.effect
     @reactive.event(input.upload_data, ignore_init=True)
-    def _():
+    def _navigate_to_summary():
+        df = loaded_data()
+        if df is None or df.empty:
+            ui.notification_show("Load a valid dataset before continuing.", type="warning", duration=4)
+            return
         ui.update_navset("main_nav", selected="summary", session=session)
 
     def _normalize_selection(selection):
@@ -447,7 +467,7 @@ def server_function(input, output, session):
 
     @reactive.effect
     @reactive.event(input.upload_data, ignore_init=True)
-    def _():
+    def _populate_summary_controls():
         df = loaded_data()
         if df is None:
             ui.update_selectize("vars_stat_selected", choices=[], selected=[], session=session)
@@ -488,6 +508,23 @@ def server_function(input, output, session):
             return ui.div("Select one or more variables to see summary statistics.", class_="alert alert-info py-2")
 
         return ui.div("Summary statistics are ready.", class_="alert alert-success py-2")
+
+    @output
+    @render.ui
+    def summary_next_actions():
+        df = loaded_data()
+        ready = df is not None and not df.empty and bool(df.select_dtypes(include="number").columns.tolist())
+        return ui.div(
+            ui.p("Review the selected variables, then continue to forecasting.", class_="next-step-copy"),
+            ui.input_action_button(
+                "implement_forecasting",
+                "Continue to forecasting",
+                icon=ui.tags.i(class_="fa-solid fa-chart-line"),
+                class_="btn-primary",
+                disabled=not ready,
+            ),
+            class_="summary-next-actions",
+        )
 
     @output
     @render.data_frame
@@ -1729,61 +1766,164 @@ def server_function(input, output, session):
     @reactive.effect
     @reactive.event(input.implement_forecasting, ignore_init=True)
     def _implement_forecasting_from_summary():
+        df = loaded_data()
+        if df is None or df.empty or not _numeric_columns(df):
+            ui.notification_show("Load data with at least one numeric column before forecasting.", type="warning", duration=4)
+            return
         ui.update_navset("main_nav", selected="forecasting", session=session)
+
+    def _recommended_settings(df, data_type, response_column):
+        if df is None or df.empty:
+            return None
+
+        quality = _data_quality_summary(df)
+        if response_column not in _numeric_columns(df):
+            return None
+
+        if data_type == "Time Series":
+            y = pd.to_numeric(df[response_column], errors="coerce").dropna()
+            profile = _time_series_profile(df, response_column)
+            detected_period = profile.get("detected_period")
+            if len(y) < 12:
+                models = ["Naive", "Moving Average", "ETS"]
+                reason = "short history"
+            elif detected_period:
+                models = ["Seasonal Naive", "SARIMA", "Prophet", "Ensemble"]
+                reason = f"{profile.get('frequency_label', 'series')} data with seasonal signal"
+            elif len(y) > 80:
+                models = ["ARIMA", "ETS", "AutoML", "Ensemble"]
+                reason = "enough history to compare multiple models"
+            else:
+                models = ["Naive", "Drift", "ARIMA", "ETS"]
+                reason = "moderate history without strong detected seasonality"
+
+            profile_note = f"Trend looks {profile.get('trend', 'flat')}."
+            if profile.get("notes"):
+                profile_note += " " + "; ".join(profile["notes"]) + "."
+            caution = " Clean data quality issues first." if any(count for _, count, _ in quality["rows"][:4]) else ""
+            return {
+                "response": response_column,
+                "models": models,
+                "reason": reason,
+                "note": f"{profile_note}{caution}",
+                "seasonal": bool(detected_period),
+                "seasonal_period": detected_period or 12,
+                "metric": "MASE",
+            }
+
+        feature_cols = _feature_columns(df, response_column)
+        if len(feature_cols) > len(df) / 2:
+            models = ["LASSO", "Ridge Regression"]
+            reason = "many predictors relative to rows"
+        elif len(feature_cols) <= 2:
+            models = ["Linear Regression", "GLM"]
+            reason = "small feature set"
+        else:
+            models = ["Linear Regression", "Ridge Regression", "LASSO"]
+            reason = "balanced feature and row count"
+        caution = " Address missing or mixed-type columns first." if quality["non_numeric"] or quality["rows"][0][1] else ""
+        return {
+            "response": response_column,
+            "models": models,
+            "reason": reason,
+            "note": caution.strip(),
+            "metric": "RMSE",
+        }
+
+    @reactive.calc
+    @reactive.event(input.response_variable, input.data_type, ignore_none=False)
+    def recommended_settings():
+        df = loaded_data()
+        return _recommended_settings(df, input.data_type(), input.response_variable())
 
     @output
     @render.ui
     def model_recommendation():
+        settings = recommended_settings()
+        if not settings:
+            return ui.div()
+        suggested = ", ".join(settings["models"])
+        note = f" {settings['note']}" if settings.get("note") else ""
+        return ui.div(
+            ui.div(
+                ui.tags.i(class_="fa-solid fa-lightbulb"),
+                ui.span(f"Recommended for {settings['response']}: {suggested} ({settings['reason']}).{note}"),
+                class_="recommendation-copy",
+            ),
+            ui.input_action_button(
+                "apply_recommendation",
+                "Use recommended settings",
+                icon=ui.tags.i(class_="fa-solid fa-wand-magic-sparkles"),
+                class_="btn-info btn-sm",
+            ),
+            class_="recommendation-panel",
+        )
+
+    @reactive.effect
+    @reactive.event(input.apply_recommendation, ignore_init=True)
+    def _apply_recommended_settings():
+        settings = recommended_settings()
+        if not settings:
+            ui.notification_show("Load data before applying recommended settings.", type="warning", duration=4)
+            return
+
+        if input.data_type() == "Time Series":
+            ui.update_selectize("model", selected=settings["models"], session=session)
+            ui.update_checkbox("seasonal", value=settings.get("seasonal", False), session=session)
+            ui.update_numeric("seasonal_period", value=settings.get("seasonal_period", 12), session=session)
+        else:
+            ui.update_selectize("model1", selected=settings["models"], session=session)
+        ui.update_select("best_model_metric", selected=settings.get("metric", "MASE"), session=session)
+        ui.notification_show("Recommended settings applied.", type="message", duration=3)
+
+    def _forecast_is_ready():
         df = loaded_data()
         if df is None or df.empty:
-            return ui.div()
-        
-        data_type = input.data_type()
-        quality = _data_quality_summary(df)
-        if data_type == "Time Series":
-            response = _preferred_response_column(df)
-            if not response:
-                return ui.div()
-            y = pd.to_numeric(df[response], errors="coerce").dropna()
-            profile = _time_series_profile(df, response)
-            detected_period = profile.get("detected_period")
-            if len(y) < 12:
-                suggested = "Naive, Moving Average, and ETS with a short holdout"
-                reason = "short history"
-            elif detected_period:
-                suggested = f"Seasonal Naive, SARIMA, Prophet, and Ensemble; seasonal period around {detected_period}"
-                reason = f"{profile.get('frequency_label', 'series')} data with seasonal signal"
-            elif len(y) > 80:
-                suggested = "ARIMA, ETS, AutoML, baselines, and weighted Ensemble"
-                reason = "enough history to compare multiple models"
-            else:
-                suggested = "Naive, Drift, ARIMA, and ETS"
-                reason = "moderate history without strong detected seasonality"
-            profile_note = f" Trend looks {profile.get('trend', 'flat')}."
-            if profile.get("notes"):
-                profile_note += " " + "; ".join(profile["notes"]) + "."
-            caution = " Clean data quality issues first." if any(count for _, count, _ in quality["rows"][:4]) else ""
-            return ui.div(ui.tags.i(class_="fa-solid fa-lightbulb"), f" Recommended: {suggested} ({reason}).{profile_note}{caution}", class_="alert alert-info py-2 m-2")
-        else:
-            response = _preferred_response_column(df)
-            if not response:
-                return ui.div()
-            feature_cols = _feature_columns(df, response)
-            if len(feature_cols) > len(df) / 2:
-                suggested = "LASSO or Ridge"
-                reason = "many predictors relative to rows"
-            elif len(feature_cols) <= 2:
-                suggested = "Linear Regression or GLM"
-                reason = "small feature set"
-            else:
-                suggested = "Linear Regression, Ridge Regression, and LASSO comparison"
-                reason = "balanced feature and row count"
-            caution = " Address missing or mixed-type columns first." if quality["non_numeric"] or quality["rows"][0][1] else ""
-            return ui.div(ui.tags.i(class_="fa-solid fa-lightbulb"), f" Recommended: {suggested} ({reason}).{caution}", class_="alert alert-info py-2 m-2")
+            return False
+        response = input.response_variable()
+        if response not in _numeric_columns(df):
+            return False
+        if input.data_type() == "Time Series":
+            return bool(_normalize_selection(input.model()))
+        return bool(_normalize_selection(input.model1())) and bool(_feature_columns(df, response))
+
+    @output
+    @render.ui
+    def forecast_action_controls():
+        ready = _forecast_is_ready()
+        result = forecast_result.get()
+        report_ready = bool(result and result.get("ok"))
+        return ui.div(
+            ui.input_action_button(
+                "forecast",
+                "Generate Forecast",
+                icon=ui.tags.i(class_="fa-solid fa-arrow-right"),
+                class_="btn-primary w-100",
+                disabled=not ready,
+            ),
+            ui.download_button(
+                "download",
+                "Download Data",
+                icon=ui.tags.i(class_="fa-solid fa-download"),
+                class_="btn-info w-100 mt-2" + ("" if report_ready else " disabled"),
+                disabled=not report_ready,
+            ),
+            ui.download_button(
+                "download_report",
+                "Download Full Report",
+                icon=ui.tags.i(class_="fa-solid fa-file-lines"),
+                class_="btn-secondary w-100 mt-2" + ("" if report_ready else " disabled"),
+                disabled=not report_ready,
+            ),
+            class_="button-column",
+        )
 
     @reactive.effect
     @reactive.event(input.forecast, ignore_init=True)
     def _generate_forecast_from_forecast_tab():
+        if not _forecast_is_ready():
+            ui.notification_show("Choose a response variable and at least one model before generating a forecast.", type="warning", duration=4)
+            return
         forecast_result.set(_build_forecast_result())
 
     @output
@@ -2039,6 +2179,28 @@ def server_function(input, output, session):
                 ),
                 class_="metric-grid mt-2",
             )
+        )
+
+    @output
+    @render.ui
+    def validation_summary():
+        result = forecast_result.get()
+        if result is None:
+            return ui.div("Generate a forecast to see validation details.", class_="alert alert-info py-2")
+        if not result.get("ok"):
+            return ui.div(result.get("message", "Forecasting failed."), class_="alert alert-danger py-2")
+        if result.get("kind") == "Time Series":
+            return ui.div("Backtesting is shown for time-series forecasts.", class_="alert alert-info py-2")
+        split = result.get("train_split", 100)
+        method = result.get("validation_method", "Validation")
+        return ui.div(
+            ui.div("Validation Summary", style="color: #9db2ce; font-size: 0.85rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.5rem;"),
+            ui.div(
+                ui.div(ui.div(str(method), class_="forecast-stat-value is-text"), ui.div("Method", class_="forecast-stat-label"), class_="forecast-stat-card border-primary"),
+                ui.div(ui.div(f"{split}%", class_="forecast-stat-value is-text"), ui.div("Training Split", class_="forecast-stat-label"), class_="forecast-stat-card border-success"),
+                ui.div(ui.div(result.get("best_model", "N/A"), class_="forecast-stat-value is-text"), ui.div("Best Model", class_="forecast-stat-label"), class_="forecast-stat-card border-warning"),
+                class_="forecast-status-grid",
+            ),
         )
 
     @output
