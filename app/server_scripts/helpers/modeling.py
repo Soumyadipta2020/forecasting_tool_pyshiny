@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pandas as pd
 
@@ -120,3 +122,172 @@ def interval_quality_label(metrics):
     if coverage >= 70:
         return "Usable intervals", "Coverage is moderate; check whether the interval width is acceptable.", "warning"
     return "Weak intervals", "Coverage is low on validation data; treat uncertainty bands cautiously.", "danger"
+
+
+def numeric_logistic_target(y_train, max_bins=10):
+    y_train = pd.Series(y_train).astype(float).reset_index(drop=True)
+    bin_count = max(2, min(int(max_bins), int(y_train.nunique()), max(2, len(y_train) // 3)))
+    labels = pd.qcut(y_train, q=bin_count, labels=False, duplicates="drop")
+    labels = pd.Series(labels, index=y_train.index)
+    if labels.nunique(dropna=True) < 2:
+        labels = (y_train > y_train.median()).astype(int)
+    if labels.nunique(dropna=True) < 2:
+        raise RuntimeError("Logistic Regression needs at least two target bands.")
+
+    label_medians = y_train.groupby(labels).median().to_dict()
+    return labels.astype(int), {int(label): float(median) for label, median in label_medians.items()}
+
+
+def decode_numeric_logistic_predictions(predicted_labels, label_medians, fallback):
+    return np.asarray([label_medians.get(int(label), fallback) for label in predicted_labels], dtype=float)
+
+
+def fit_theta_forecast(values, horizon, seasonal_period=1):
+    try:
+        from statsmodels.tsa.forecasting.theta import ThetaModel
+    except ImportError as exc:
+        raise RuntimeError("Theta requires a statsmodels version with ThetaModel support.") from exc
+
+    y = pd.Series(np.asarray(values, dtype=float))
+    period = max(2, int(seasonal_period or 2))
+    if len(y) <= period * 2:
+        period = 2
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        fit = ThetaModel(y, period=period).fit()
+        future = np.asarray(fit.forecast(horizon), dtype=float)
+
+    fitted = _theta_fitted_values(ThetaModel, y, period)
+    lower = upper = None
+    if hasattr(fit, "prediction_intervals"):
+        try:
+            intervals = fit.prediction_intervals(horizon, alpha=0.05)
+            lower = np.asarray(intervals["lower"], dtype=float)
+            upper = np.asarray(intervals["upper"], dtype=float)
+        except Exception:
+            lower = upper = None
+
+    summary = [
+        "Model: Theta",
+        "Engine: statsmodels ThetaModel",
+        f"Period: {period}",
+        "Fitted values: rolling one-step Theta forecasts.",
+    ]
+    try:
+        summary.append(str(fit.summary()))
+    except Exception:
+        pass
+    return fitted, future, "\n".join(summary), lower, upper
+
+
+def _theta_fitted_values(theta_model, y, period):
+    fitted = np.full(len(y), np.nan)
+    for idx in range(2, len(y)):
+        train = y.iloc[:idx]
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                fitted[idx] = float(np.asarray(theta_model(train, period=period).fit().forecast(1), dtype=float)[0])
+        except Exception:
+            fitted[idx] = float(train.iloc[-1])
+    return fitted
+
+
+def fit_volatility_forecast(values, horizon, model_name):
+    y = np.asarray(values, dtype=float)
+    if len(y) < 3:
+        raise RuntimeError("ARCH/GARCH models need at least 3 valid observations.")
+
+    try:
+        return _fit_arch_package_forecast(y, horizon, model_name)
+    except ImportError:
+        return _fit_arch_garch_fallback(y, horizon, model_name, "optional arch package is not installed")
+    except Exception as exc:
+        return _fit_arch_garch_fallback(y, horizon, model_name, f"arch package fit failed: {exc}")
+
+
+def _fit_arch_package_forecast(y, horizon, model_name):
+    from arch import arch_model
+
+    vol = "ARCH" if model_name == "ARCH" else "GARCH"
+    p = 1
+    q = 0 if model_name == "ARCH" else 1
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        fit = arch_model(y, mean="AR", lags=1, vol=vol, p=p, q=q, rescale=False).fit(disp="off")
+
+    params = fit.params
+    const = float(params.get("Const", params.get("mu", np.nanmean(y))))
+    lag_name = next((name for name in params.index if str(name).endswith("[1]")), None)
+    lag_coef = float(params.get(lag_name, 0.0)) if lag_name is not None else 0.0
+    fitted = np.full(len(y), np.nan)
+    fitted[1:] = const + lag_coef * y[:-1]
+
+    forecast = fit.forecast(horizon=horizon, reindex=False)
+    future = np.asarray(forecast.mean.iloc[-1].to_numpy(), dtype=float)
+    variance = np.asarray(forecast.variance.iloc[-1].to_numpy(), dtype=float)
+    radius = 1.96 * np.sqrt(np.maximum(variance, 0))
+    summary = f"Model: {model_name}\nEngine: arch.arch_model\nVolatility: {vol}({p}, {q})\n{fit.summary()}"
+    return fitted, future, summary, future - radius, future + radius
+
+
+def _fit_arch_garch_fallback(y, horizon, model_name, reason):
+    fitted, future, residuals = _ar1_mean_forecast(y, horizon)
+    residuals = residuals[np.isfinite(residuals)]
+    base_var = float(np.var(residuals, ddof=1)) if len(residuals) > 1 else float(np.var(y, ddof=1))
+    if not np.isfinite(base_var) or base_var <= 0:
+        diffs = np.diff(y)
+        base_var = float(np.var(diffs, ddof=1)) if len(diffs) > 1 else 1.0
+    base_var = max(base_var, 1e-6)
+
+    if model_name == "ARCH":
+        alpha = 0.35
+        beta = 0.0
+    else:
+        alpha = 0.12
+        beta = 0.82
+    omega = base_var * max(1 - alpha - beta, 0.05)
+    last_error2 = float(residuals[-1] ** 2) if len(residuals) else base_var
+    last_var = base_var
+    variances = []
+    for _ in range(horizon):
+        next_var = omega + alpha * last_error2 + beta * last_var
+        next_var = max(float(next_var), 1e-6)
+        variances.append(next_var)
+        last_error2 = next_var
+        last_var = next_var
+
+    variance = np.asarray(variances, dtype=float)
+    radius = 1.96 * np.sqrt(variance)
+    model_type = "ARCH(1)" if model_name == "ARCH" else "GARCH(1, 1)"
+    summary = (
+        f"Model: {model_name}\n"
+        f"Engine: built-in AR(1) + {model_type} fallback\n"
+        f"Fallback reason: {reason}\n"
+        "Install the optional 'arch' package to use maximum-likelihood volatility fitting."
+    )
+    return fitted, future, summary, future - radius, future + radius
+
+
+def _ar1_mean_forecast(y, horizon):
+    fitted = np.full(len(y), np.nan)
+    if len(y) >= 2:
+        x = np.column_stack([np.ones(len(y) - 1), y[:-1]])
+        target = y[1:]
+        try:
+            const, phi = np.linalg.lstsq(x, target, rcond=None)[0]
+        except Exception:
+            const, phi = float(np.nanmean(y)), 0.0
+        fitted[1:] = const + phi * y[:-1]
+    else:
+        const, phi = float(y[-1]), 0.0
+
+    future = []
+    current = float(y[-1])
+    for _ in range(horizon):
+        current = float(const + phi * current)
+        future.append(current)
+
+    residuals = y - fitted
+    return fitted, np.asarray(future, dtype=float), residuals
