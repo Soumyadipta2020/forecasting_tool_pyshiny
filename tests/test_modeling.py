@@ -2,6 +2,8 @@ import math
 
 from server_scripts.helpers.modeling import (
     classification_metrics,
+    fit_theta_forecast,
+    fit_volatility_forecast,
     interval_quality_label,
     regression_metrics,
 )
@@ -36,3 +38,33 @@ def test_interval_quality_label_flags_weak_coverage():
 
     assert title == "Weak intervals"
     assert color == "danger"
+
+
+def test_theta_forecast_returns_fitted_forecast_and_intervals():
+    fitted, future, summary, lower, upper = fit_theta_forecast(
+        [120, 128, 135, 150, 168, 180, 194, 210, 225, 240, 260, 282],
+        horizon=3,
+        seasonal_period=4,
+    )
+
+    assert len(fitted) == 12
+    assert len(future) == 3
+    assert len(lower) == 3
+    assert len(upper) == 3
+    assert "statsmodels ThetaModel" in summary
+    assert all(math.isfinite(value) for value in future)
+
+
+def test_arch_and_garch_forecasts_fallback_when_optional_package_is_missing():
+    values = [500, 659, 453, 756, 823, 983, 821, 1040, 1175, 1210, 1305, 1420]
+
+    for model_name in ("ARCH", "GARCH"):
+        fitted, future, summary, lower, upper = fit_volatility_forecast(values, horizon=3, model_name=model_name)
+
+        assert len(fitted) == len(values)
+        assert len(future) == 3
+        assert len(lower) == 3
+        assert len(upper) == 3
+        assert model_name in summary
+        assert all(math.isfinite(value) for value in future)
+        assert all(lo <= mid <= hi for lo, mid, hi in zip(lower, future, upper))

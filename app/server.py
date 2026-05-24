@@ -12,6 +12,8 @@ from shiny import reactive, render, ui
 from shinywidgets import output_widget, render_widget
 from server_scripts.helpers.modeling import (
     classification_metrics,
+    fit_theta_forecast,
+    fit_volatility_forecast,
     interval_quality_label,
     regression_metrics,
 )
@@ -1172,38 +1174,10 @@ def server_function(input, output, session):
         return fitted, future, summary, lower, upper
 
     def _fit_volatility_model(values, horizon, model_name):
-        try:
-            from arch import arch_model
-        except ImportError as exc:
-            raise RuntimeError("Install the optional 'arch' package to run ARCH/GARCH models.") from exc
-
-        y = np.asarray(values, dtype=float)
-        vol = "ARCH" if model_name == "ARCH" else "GARCH"
-        p = 1
-        q = 0 if model_name == "ARCH" else 1
-        fit = arch_model(y, mean="AR", lags=1, vol=vol, p=p, q=q, rescale=False).fit(disp="off")
-        fitted = np.asarray(fit.params.get("Const", 0.0) + np.r_[np.nan, fit.params.get("y[1]", 0.0) * y[:-1]], dtype=float)
-        forecast = fit.forecast(horizon=horizon, reindex=False)
-        future = np.asarray(forecast.mean.iloc[-1].to_numpy(), dtype=float)
-        variance = np.asarray(forecast.variance.iloc[-1].to_numpy(), dtype=float)
-        radius = 1.96 * np.sqrt(np.maximum(variance, 0))
-        summary = f"Model: {model_name}\nEngine: arch.arch_model\nVolatility: {vol}({p}, {q})\n{fit.summary()}"
-        return fitted, future, summary, future - radius, future + radius
+        return fit_volatility_forecast(values, horizon, model_name)
 
     def _fit_theta(values, horizon, seasonal_period=1):
-        try:
-            from statsmodels.tsa.forecasting.theta import ThetaModel
-        except ImportError as exc:
-            raise RuntimeError("Theta requires a statsmodels version with ThetaModel support.") from exc
-
-        y = pd.Series(np.asarray(values, dtype=float))
-        period = max(2, int(seasonal_period or 2))
-        if len(y) <= period * 2:
-            period = 2
-        fit = ThetaModel(y, period=period).fit()
-        fitted = np.asarray(fit.fittedvalues, dtype=float)
-        future = np.asarray(fit.forecast(horizon), dtype=float)
-        return fitted, future, f"Model: Theta\nEngine: statsmodels ThetaModel\nPeriod: {period}", None, None
+        return fit_theta_forecast(values, horizon, seasonal_period)
 
     def _fit_croston(values, horizon, alpha=0.1):
         y = np.asarray(values, dtype=float)
