@@ -124,6 +124,24 @@ def interval_quality_label(metrics):
     return "Weak intervals", "Coverage is low on validation data; treat uncertainty bands cautiously.", "danger"
 
 
+def numeric_logistic_target(y_train, max_bins=10):
+    y_train = pd.Series(y_train).astype(float).reset_index(drop=True)
+    bin_count = max(2, min(int(max_bins), int(y_train.nunique()), max(2, len(y_train) // 3)))
+    labels = pd.qcut(y_train, q=bin_count, labels=False, duplicates="drop")
+    labels = pd.Series(labels, index=y_train.index)
+    if labels.nunique(dropna=True) < 2:
+        labels = (y_train > y_train.median()).astype(int)
+    if labels.nunique(dropna=True) < 2:
+        raise RuntimeError("Logistic Regression needs at least two target bands.")
+
+    label_medians = y_train.groupby(labels).median().to_dict()
+    return labels.astype(int), {int(label): float(median) for label, median in label_medians.items()}
+
+
+def decode_numeric_logistic_predictions(predicted_labels, label_medians, fallback):
+    return np.asarray([label_medians.get(int(label), fallback) for label in predicted_labels], dtype=float)
+
+
 def fit_theta_forecast(values, horizon, seasonal_period=1):
     try:
         from statsmodels.tsa.forecasting.theta import ThetaModel

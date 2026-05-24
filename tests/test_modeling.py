@@ -2,9 +2,11 @@ import math
 
 from server_scripts.helpers.modeling import (
     classification_metrics,
+    decode_numeric_logistic_predictions,
     fit_theta_forecast,
     fit_volatility_forecast,
     interval_quality_label,
+    numeric_logistic_target,
     regression_metrics,
 )
 
@@ -68,3 +70,12 @@ def test_arch_and_garch_forecasts_fallback_when_optional_package_is_missing():
         assert model_name in summary
         assert all(math.isfinite(value) for value in future)
         assert all(lo <= mid <= hi for lo, mid, hi in zip(lower, future, upper))
+
+
+def test_numeric_logistic_target_bins_continuous_response_for_regression_forecasts():
+    labels, label_medians = numeric_logistic_target([500, 659, 453, 756, 823, 983, 821, 1040, 1175])
+    decoded = decode_numeric_logistic_predictions(labels[:4], label_medians, fallback=0.0)
+
+    assert labels.nunique() >= 2
+    assert len(decoded) == 4
+    assert all(math.isfinite(value) for value in decoded)

@@ -12,9 +12,11 @@ from shiny import reactive, render, ui
 from shinywidgets import output_widget, render_widget
 from server_scripts.helpers.modeling import (
     classification_metrics,
+    decode_numeric_logistic_predictions,
     fit_theta_forecast,
     fit_volatility_forecast,
     interval_quality_label,
+    numeric_logistic_target,
     regression_metrics,
 )
 
@@ -1795,14 +1797,35 @@ def server_function(input, output, session):
                     coef = estimator.coef_[0] if len(estimator.coef_) == 1 else estimator.coef_[0]
                     importance = {"features": x_frame.columns.tolist(), "importance": coef.tolist()}
                 else:
-                    if model_name == "Logistic Regression":
-                        failed_models[model_name] = "Logistic Regression requires a categorical target with 20 or fewer classes."
-                        continue
                     y = y_numeric.loc[keep_rows].astype(float).reset_index(drop=True)
                     y_tr, y_te = y.iloc[idx_train], y.iloc[idx_test]
                     metric_kind = "regression"
                     importance = None
-                    if model_name == "GLM":
+                    if model_name == "Logistic Regression":
+                        y_tr_labels, label_medians = numeric_logistic_target(y_tr)
+                        model, best_params = _fit_estimator(
+                            make_pipeline(StandardScaler(), LogisticRegression(max_iter=1000)),
+                            {"logisticregression__C": [0.2, 1.0, 5.0]},
+                            x_train,
+                            y_tr_labels,
+                            scoring="accuracy",
+                        )
+                        fallback = float(y_tr.median())
+                        fitted_full = decode_numeric_logistic_predictions(model.predict(x_frame), label_medians, fallback)
+                        test_pred = decode_numeric_logistic_predictions(model.predict(x_test), label_medians, fallback)
+                        metrics = _regression_metrics(y_te, test_pred)
+                        summary = _sklearn_regression_summary(model_name, model, x_frame.columns.tolist())
+                        summary += (
+                            "\nTarget handling: continuous response was binned into "
+                            f"{len(label_medians)} quantile classes, then decoded to class medians for numeric forecasts."
+                        )
+                        if best_params:
+                            summary += "\nBest tuned parameters: " + str(best_params)
+
+                        estimator = model.steps[-1][1]
+                        coef = estimator.coef_[0] if len(estimator.coef_) == 1 else np.mean(estimator.coef_, axis=0)
+                        importance = {"features": x_frame.columns.tolist(), "importance": coef.tolist()}
+                    elif model_name == "GLM":
                         x_tr_const = sm.add_constant(x_train, has_constant="add")
                         x_full_const = sm.add_constant(x_frame, has_constant="add")
                         model = sm.GLM(y_tr, x_tr_const, family=sm.families.Gaussian()).fit()
