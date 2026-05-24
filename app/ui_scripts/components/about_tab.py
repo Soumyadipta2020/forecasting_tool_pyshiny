@@ -37,6 +37,10 @@ def _change_card(date: str, items: list[str]):
     )
 
 
+def _latest_changelogs():
+    return sorted(CHANGELOGS, key=lambda entry: entry[0], reverse=True)
+
+
 def about_tab():
     return ui.nav_panel(
         ui.span(_icon("circle-info"), "About", class_="nav-label"),
@@ -68,6 +72,6 @@ def about_tab():
             ),
         ),
         ui.h3("Latest Changelogs"),
-        *(_change_card(date, items) for date, items in CHANGELOGS),
+        *(_change_card(date, items) for date, items in _latest_changelogs()),
         value="about",
     )
